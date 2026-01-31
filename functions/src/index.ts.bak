@@ -1,0 +1,158 @@
+import * as functions from "firebase-functions/v1";
+import * as admin from "firebase-admin";
+import { processMessage } from "./ai/agent";
+
+// admin initialized in tools/definitions.ts? No, it imports it.
+// Best practice: init here if not already.
+
+export const twilioWebhookWhatsapp = functions.https.onRequest(async (req, res) => {
+    if (!admin.apps.length) {
+        admin.initializeApp();
+    }
+    const db = admin.firestore(); // Initialize lazily
+
+    // Twilio sends form-urlencoded
+    const incomingMsg = req.body.Body;
+    const from = req.body.From; // whatsapp:+1234567890
+
+    // Extract pure phone number
+    const phone = from.replace('whatsapp:', '');
+
+    console.log(`Msg from ${phone}: ${incomingMsg}`);
+
+    try {
+        // 1. Save Inbound Message
+        await db.collection('messages').add({
+            phone: phone,
+            content: incomingMsg,
+            direction: 'inbound',
+            timestamp: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        // 2. Process with AI
+        const aiResponse = await processMessage(phone, incomingMsg);
+        const replyText = aiResponse || "Lo siento, tuve un error.";
+
+        // 3. Save Outbound Message
+        await db.collection('messages').add({
+            phone: phone,
+            content: replyText,
+            direction: 'outbound',
+            timestamp: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        // 4. Send Response to Twilio (TwiML)
+        const twiml = `
+    <Response>
+        <Message>${replyText}</Message>
+    </Response>
+    `;
+
+        res.type('text/xml');
+        res.send(twiml);
+
+    } catch (error) {
+        console.error("Error processing message:", error);
+        res.status(500).send("Internal Server Error");
+    }
+});
+
+// Scheduled Function: Membership Reminders (Daily 9 AM)
+export const sendReminders = functions.pubsub.schedule('0 9 * * *').onRun(async (context: functions.EventContext) => {
+    if (!admin.apps.length) {
+        admin.initializeApp();
+    }
+    const db = admin.firestore(); // Initialize lazily
+    // Initialize Twilio lazily
+    const twilio = require('twilio');
+    const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+
+    const today = new Date();
+    const targetDate = new Date();
+    targetDate.setDate(today.getDate() + 3); // 3 days before expiry
+
+    // Convert to ISO string for comparison (simplified)
+    const dateStr = targetDate.toISOString().split('T')[0];
+
+    const membersSnap = await db.collection('members')
+        .where('endDate', '==', dateStr)
+        .get();
+
+    for (const doc of membersSnap.docs) {
+        const member = doc.data();
+        if (member.phone) {
+            try {
+                await client.messages.create({
+                    from: 'whatsapp:+14155238886', // Sandbox number or your configured sender
+                    to: `whatsapp:${member.phone}`,
+                    body: `Hola ${member.name}, tu membresía vence en 3 días. Por favor renueva para seguir entrenando.`
+                });
+            } catch (e) {
+                console.error(`Failed to send reminder to ${member.name}`, e);
+            }
+        }
+    }
+});
+
+// Scheduled Function: Class Reminders (Every Hour)
+export const sendClassReminders = functions.pubsub.schedule('0 * * * *').onRun(async (context: functions.EventContext) => {
+    // Logic: Find bookings for next hour
+    // For MVP, logging execution
+    console.log("Checking for upcoming classes...");
+});
+
+
+// Stripe Integration
+import Stripe from 'stripe';
+
+
+
+export const createStripeCheckout = functions.https.onCall(async (data: any, context: functions.https.CallableContext) => {
+    // Initialize Stripe lazily
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '', {
+        apiVersion: '2024-12-18.acacia' as any,
+    });
+
+    // 1. Auth Check
+    if (!context.auth) {
+        throw new functions.https.HttpsError('unauthenticated', 'User must be logged in');
+    }
+
+    const { planName, price, successUrl, cancelUrl } = data;
+
+    if (!price) {
+        throw new functions.https.HttpsError('invalid-argument', 'Missing price information');
+    }
+
+    try {
+        // 2. Create Checkout Session
+        const session = await stripe.checkout.sessions.create({
+            payment_method_types: ['card'],
+            mode: 'payment', // or 'subscription' if using recurring prices
+            line_items: [
+                {
+                    price_data: {
+                        currency: 'pen', // Soles provided user location/context, or make dynamic
+                        product_data: {
+                            name: planName || 'Plan de Gimnasio',
+                        },
+                        unit_amount: Math.round(price * 100), // Stripe expects cents
+                    },
+                    quantity: 1,
+                },
+            ],
+            success_url: successUrl,
+            cancel_url: cancelUrl,
+            metadata: {
+                userId: context.auth.uid,
+                planName: planName
+            }
+        });
+
+        return { url: session.url };
+    } catch (error: any) {
+        console.error('Stripe Error:', error);
+        throw new functions.https.HttpsError('internal', error.message);
+    }
+});
+
