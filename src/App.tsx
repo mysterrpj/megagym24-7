@@ -13,6 +13,7 @@ import { MembershipsPage } from '@/pages/dashboard/MembershipsPage';
 
 
 import { RegisterPage } from '@/pages/RegisterPage';
+import { PublicPaymentPage } from '@/pages/PublicPaymentPage';
 
 import { RequireAdmin, RequireAuth } from '@/lib/auth';
 import { MemberDashboard } from '@/pages/MemberDashboard';
@@ -24,6 +25,7 @@ function App() {
                 <Route path="/" element={<LandingPage />} />
                 <Route path="/login" element={<LoginPage />} />
                 <Route path="/register" element={<RegisterPage />} />
+                <Route path="/pagar" element={<PublicPaymentPage />} />
 
                 {/* Member Routes */}
                 <Route element={<RequireAuth />}>

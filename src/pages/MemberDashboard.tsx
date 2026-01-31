@@ -32,10 +32,51 @@ export function MemberDashboard() {
                         <CardHeader>
                             <CardTitle className="text-white">Mi Membresía</CardTitle>
                         </CardHeader>
-                        <CardContent>
-                            <div className="p-4 bg-green-500/10 rounded-lg border border-green-500/20 text-center">
-                                <p className="text-green-500 font-medium">No tienes membresía activa</p>
-                                <Button className="mt-4 w-full bg-green-600 hover:bg-green-700">Explorar Planes</Button>
+                        <CardContent className="space-y-4">
+                            <div className="p-4 bg-yellow-500/10 rounded-lg border border-yellow-500/20 text-center mb-6">
+                                <p className="text-yellow-500 font-medium">No tienes membresía activa</p>
+                                <p className="text-sm text-gray-400 mt-1">Elige un plan para comenzar</p>
+                            </div>
+
+                            <div className="grid grid-cols-1 gap-3">
+                                {[
+                                    { name: '1 Mes', price: 80, label: 'Mensual' },
+                                    { name: '2 Meses', price: 120, label: 'Bimestral (Ahorra S/ 40)' },
+                                    { name: '3 Meses', price: 150, label: 'Trimestral (Ahorra S/ 90)' }
+                                ].map((plan) => (
+                                    <div key={plan.name} className="flex items-center justify-between p-3 bg-neutral-800 rounded-lg border border-neutral-700">
+                                        <div>
+                                            <p className="font-bold text-white text-sm">{plan.label}</p>
+                                            <p className="text-yellow-500 font-bold">S/ {plan.price}.00</p>
+                                        </div>
+                                        <Button
+                                            size="sm"
+                                            className="bg-yellow-500 text-black hover:bg-yellow-400 font-bold"
+                                            onClick={async () => {
+                                                try {
+                                                    const { httpsCallable } = await import('firebase/functions');
+                                                    const { functions } = await import('@/lib/firebase');
+                                                    const createCheckout = httpsCallable(functions, 'createCulqiCheckout');
+
+                                                    // Show loading state if possible (simple alert for now or implement loading state)
+                                                    const res: any = await createCheckout({
+                                                        planName: plan.name,
+                                                        price: plan.price
+                                                    });
+
+                                                    if (res.data.orderId) {
+                                                        window.location.href = `/pagar?orderId=${res.data.orderId}`;
+                                                    }
+                                                } catch (error) {
+                                                    console.error("Payment Error:", error);
+                                                    alert("Error al iniciar pago. Intenta de nuevo.");
+                                                }
+                                            }}
+                                        >
+                                            Pagar
+                                        </Button>
+                                    </div>
+                                ))}
                             </div>
                         </CardContent>
                     </Card>

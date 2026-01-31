@@ -1,24 +1,27 @@
-import OpenAI from 'openai';
-import * as admin from 'firebase-admin';
-import { tools, executeTool } from '../tools/definitions';
-
-// Initialize OpenAI inside function to avoid deployment errors if key is missing
-// Note: Requires OPENAI_API_KEY in environment variables at runtime
 export async function processMessage(phone: string, messageText: string) {
+    // Lazy imports (CommonJS style)
+    const OpenAI = require('openai');
+    const admin = require('firebase-admin');
+    const { tools, executeTool } = require('../tools/definitions');
+
     const openai = new OpenAI({
         apiKey: process.env.OPENAI_API_KEY || 'placeholder-key'
     });
 
+    // Ensure admin is initialized (idempotent check)
+    if (!admin.apps.length) {
+        admin.initializeApp();
+    }
     const db = admin.firestore();
 
     // 1. Get History
     const historySnapshot = await db.collection('messages')
         .where('phone', '==', phone)
-        .orderBy('timestamp', 'asc') // Create index if needed
+        .orderBy('timestamp', 'asc')
         .limitToLast(10)
         .get();
 
-    const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = historySnapshot.docs.map(doc => {
+    const messages: any[] = historySnapshot.docs.map((doc: any) => {
         const data = doc.data();
         return {
             role: data.direction === 'inbound' ? 'user' : 'assistant',
@@ -36,7 +39,7 @@ export async function processMessage(phone: string, messageText: string) {
     **GYM INFORMATION (Source of Truth):**
     - **Address:** Mz I Lt 5 Montenegro, San Juan de Lurigancho.
     - **Hours:** Monday to Saturday: 6:00 AM - 10:00 PM. Feriados: Ask for confirmation.
-    - **Payment Methods:** Yape, Plin, Cash, Credit Card (Stripe for web).
+    - **Payment Methods:** Yape, Plin, Cash, Credit Card (Culqi/Web).
 
     - **Prices:** (No enrollment fee)
         - **1 Month:** S/ 80.
@@ -80,7 +83,7 @@ export async function processMessage(phone: string, messageText: string) {
 
     // 3. Handle Tool Calls
     if (responseMessage.tool_calls) {
-        const toolMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [...messages, responseMessage];
+        const toolMessages: any[] = [...messages, responseMessage];
 
         for (const toolCall of responseMessage.tool_calls) {
             const functionName = toolCall.function.name;

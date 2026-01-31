@@ -5,7 +5,8 @@ import { Button } from '@/components/ui/button';
 import { Search, UserPlus, Mail, Phone, MoreHorizontal, ChevronLeft, ChevronRight, X, CreditCard, Edit, Trash, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { httpsCallable } from 'firebase/functions';
-import { functions } from '@/lib/firebase';
+import { functions, db } from '@/lib/firebase';
+import { collection, onSnapshot, query, orderBy, addDoc, updateDoc, doc, deleteDoc, serverTimestamp } from 'firebase/firestore';
 
 // Type definitions
 interface Member {
@@ -15,53 +16,9 @@ interface Member {
     phone: string;
     plan: string;
     joinDate: string;
-    status: 'active' | 'pending' | 'overdue';
+    status: 'active' | 'pending' | 'overdue' | 'prospect';
     avatarColor: string;
 }
-
-// Sample data
-const initialMembers: Member[] = [
-    {
-        id: '1',
-        name: 'Ana Eliazar',
-        email: 'ana@mail.com',
-        phone: '5007008000',
-        plan: 'Membresía Fit 2026',
-        joinDate: '23 ene 2026',
-        status: 'active',
-        avatarColor: 'bg-green-600'
-    },
-    {
-        id: '2',
-        name: 'Carlos Ruiz',
-        email: 'carlos@mail.com',
-        phone: '5512345678',
-        plan: 'Plan Trimestral',
-        joinDate: '15 ene 2026',
-        status: 'active',
-        avatarColor: 'bg-blue-600'
-    },
-    {
-        id: '3',
-        name: 'Laura Mendez',
-        email: 'laura@mail.com',
-        phone: '5587654321',
-        plan: 'Plan Mensual',
-        joinDate: '10 dic 2025',
-        status: 'overdue',
-        avatarColor: 'bg-purple-600'
-    },
-    {
-        id: '4',
-        name: 'Roberto Sánchez',
-        email: 'robert@mail.com',
-        phone: '5544332211',
-        plan: 'Membresía Fit 2026',
-        joinDate: '05 feb 2026',
-        status: 'pending',
-        avatarColor: 'bg-orange-600'
-    },
-];
 
 // Stats Card Component
 function StatsCard({ title, value, color }: { title: string; value: number; color: string }) {
@@ -89,7 +46,7 @@ function MemberModal({
     const [email, setEmail] = useState(member?.email || '');
     const [phone, setPhone] = useState(member?.phone || '');
     const [plan, setPlan] = useState(member?.plan || 'Membresía Fit 2026');
-    const [status, setStatus] = useState<'active' | 'pending'>(member?.status === 'overdue' ? 'active' : (member?.status || 'active'));
+    const [status, setStatus] = useState<'active' | 'pending' | 'prospect'>(member?.status === 'overdue' ? 'active' : (member?.status || 'active'));
 
     const handleSubmit = () => {
         if (!name || !email || !phone) return;
@@ -184,6 +141,7 @@ function MemberModal({
                             >
                                 <option value="active">Activo</option>
                                 <option value="pending">Pendiente</option>
+                                <option value="prospect">Prospecto</option>
                             </select>
                         </div>
                     </div>
@@ -217,6 +175,11 @@ function PaymentModal({
     const handlePayment = async () => {
         setLoading(true);
         try {
+            // Updated to use the new generateCulqiLink microservice if desired, 
+            // but keeping Stripe for legacy compatibility if user still wants it here.
+            // For consistency with the user request, we are primarily fixing the DISPLAY of members.
+            // We will leave the Stripe logic here as it's a separate "Generate Payment" action from the dashboard side.
+
             const createStripeCheckout = httpsCallable(functions, 'createStripeCheckout');
             const result = await createStripeCheckout({
                 planName: selectedPlan,
@@ -389,14 +352,39 @@ function MemberActionsMenu({
 }
 
 export function MembersPage() {
-    const [members, setMembers] = useState<Member[]>(initialMembers);
+    const [members, setMembers] = useState<Member[]>([]);
     const [searchTerm, setSearchTerm] = useState('');
-    const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'pending' | 'overdue'>('all');
+    const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'pending' | 'overdue' | 'prospect'>('all');
+    const [loading, setLoading] = useState(true);
 
     // Modal State
     const [modalMode, setModalMode] = useState<'create' | 'edit' | 'none'>('none');
     const [selectedMember, setSelectedMember] = useState<Member | undefined>(undefined);
     const [showPaymentModal, setShowPaymentModal] = useState(false);
+
+    // Real-time Firestore Subscription
+    useEffect(() => {
+        const q = query(collection(db, 'members'), orderBy('createdAt', 'desc'));
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            const fetchedMembers: Member[] = snapshot.docs.map(doc => {
+                const data = doc.data();
+                return {
+                    id: doc.id,
+                    name: data.name || 'Sin Nombre',
+                    email: data.email || '',
+                    phone: data.phone || '',
+                    plan: data.plan || '',
+                    joinDate: data.createdAt?.toDate().toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' }) || 'Reciente',
+                    status: data.status || 'prospect',
+                    avatarColor: `bg-${['green', 'blue', 'purple', 'orange', 'pink'][Math.floor(Math.random() * 5)]}-600`
+                };
+            });
+            setMembers(fetchedMembers);
+            setLoading(false);
+        });
+
+        return () => unsubscribe();
+    }, []);
 
     // Handlers
     const handleAction = (action: 'payment' | 'edit' | 'delete', member: Member) => {
@@ -408,26 +396,35 @@ export function MembersPage() {
             setModalMode('edit');
         } else if (action === 'delete') {
             if (confirm(`¿Estás seguro de que quieres eliminar a ${member.name}?`)) {
-                setMembers(prev => prev.filter(m => m.id !== member.id));
+                deleteDoc(doc(db, 'members', member.id));
             }
         }
     };
 
-    const handleCreateOrUpdateMember = (data: any) => {
-        if (modalMode === 'create') {
-            const newMember: Member = {
-                id: Date.now().toString(),
-                name: data.name,
-                email: data.email,
-                phone: data.phone,
-                plan: data.plan,
-                joinDate: new Date().toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' }),
-                status: data.status,
-                avatarColor: `bg-${['green', 'blue', 'purple', 'orange', 'pink'][Math.floor(Math.random() * 5)]}-600`
-            };
-            setMembers([newMember, ...members]);
-        } else if (modalMode === 'edit' && data.id) {
-            setMembers(prev => prev.map(m => m.id === data.id ? { ...m, ...data } : m));
+    const handleCreateOrUpdateMember = async (data: any) => {
+        try {
+            if (modalMode === 'create') {
+                await addDoc(collection(db, 'members'), {
+                    name: data.name,
+                    email: data.email,
+                    phone: data.phone,
+                    plan: data.plan,
+                    status: data.status,
+                    createdAt: serverTimestamp()
+                });
+            } else if (modalMode === 'edit' && data.id) {
+                await updateDoc(doc(db, 'members', data.id), {
+                    name: data.name,
+                    email: data.email,
+                    phone: data.phone,
+                    plan: data.plan,
+                    status: data.status,
+                    updatedAt: serverTimestamp()
+                });
+            }
+        } catch (error) {
+            console.error("Error saving member:", error);
+            alert("Error al guardar el miembro.");
         }
         setModalMode('none');
         setSelectedMember(undefined);
@@ -447,6 +444,11 @@ export function MembersPage() {
     const activeMembers = members.filter(m => m.status === 'active').length;
     const pendingMembers = members.filter(m => m.status === 'pending').length;
     const overdueMembers = members.filter(m => m.status === 'overdue').length;
+    const prospectMembers = members.filter(m => m.status === 'prospect').length;
+
+    if (loading) {
+        return <div className="flex justify-center items-center h-64"><Loader2 className="w-8 h-8 animate-spin text-green-500" /></div>;
+    }
 
     return (
         <div className="space-y-6">
@@ -485,6 +487,7 @@ export function MembersPage() {
                         { id: 'all', label: 'Todos', color: 'bg-green-500 text-black', inactive: 'bg-neutral-800 text-gray-400 hover:text-white' },
                         { id: 'active', label: 'Activo', color: 'bg-green-500/20 text-green-500 border border-green-500/50', inactive: 'bg-neutral-800 text-gray-400 hover:text-white' },
                         { id: 'pending', label: 'Pendiente', color: 'bg-yellow-500/20 text-yellow-500 border border-yellow-500/50', inactive: 'bg-neutral-800 text-gray-400 hover:text-white' },
+                        { id: 'prospect', label: 'Prospectos', color: 'bg-purple-500/20 text-purple-500 border border-purple-500/50', inactive: 'bg-neutral-800 text-gray-400 hover:text-white' },
                         { id: 'overdue', label: 'Vencido', color: 'bg-red-500/20 text-red-500 border border-red-500/50', inactive: 'bg-neutral-800 text-gray-400 hover:text-white' },
                     ].map((filter) => (
                         <button
@@ -550,10 +553,12 @@ export function MembersPage() {
                                                 "px-3 py-1 rounded-full text-xs font-medium border",
                                                 member.status === 'active' ? "bg-green-500/10 text-green-500 border-green-500/20" :
                                                     member.status === 'pending' ? "bg-yellow-500/10 text-yellow-500 border-yellow-500/20" :
-                                                        "bg-red-500/10 text-red-500 border-red-500/20"
+                                                        member.status === 'prospect' ? "bg-purple-500/10 text-purple-500 border-purple-500/20" :
+                                                            "bg-red-500/10 text-red-500 border-red-500/20"
                                             )}>
                                                 {member.status === 'active' ? 'Activo' :
-                                                    member.status === 'pending' ? 'Pendiente' : 'Vencido'}
+                                                    member.status === 'pending' ? 'Pendiente' :
+                                                        member.status === 'prospect' ? 'Prospecto' : 'Vencido'}
                                             </span>
                                         </td>
                                         <td className="px-6 py-4 text-right">
@@ -587,8 +592,8 @@ export function MembersPage() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <StatsCard title="Total Miembros" value={totalMembers} color="text-white" />
                 <StatsCard title="Activos" value={activeMembers} color="text-green-500" />
-                <StatsCard title="Pendientes" value={pendingMembers} color="text-yellow-500" />
-                <StatsCard title="Vencidos" value={overdueMembers} color="text-red-500" />
+                <StatsCard title="Prospectos" value={prospectMembers} color="text-purple-500" />
+                <StatsCard title="Vencidos" value={pendingMembers + overdueMembers} color="text-red-500" />
             </div>
 
             {/* Create / Edit Member Modal */}

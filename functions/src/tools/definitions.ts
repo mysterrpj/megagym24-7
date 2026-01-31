@@ -58,7 +58,7 @@ export const tools = [
         type: "function",
         function: {
             name: "generate_payment_link",
-            description: "Generate a Stripe payment link for a specific plan",
+            description: "Generate a payment link (Culqi) for a specific plan. Use this when the user wants to pay.",
             parameters: {
                 type: "object",
                 properties: {
@@ -112,56 +112,78 @@ export async function executeTool(name: string, args: any) {
 
         case 'generate_payment_link':
             try {
-                // Initialize Stripe lazily
+                // --- STRIPE IMPLEMENTATION (DORMANT) ---
+                /*
                 const Stripe = require('stripe');
                 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
                     apiVersion: '2024-12-18.acacia',
                 });
+                // ... (Original Stripe logic can be restored here)
+                */
 
-                // Fuzzy match or default
-                let amount = 8000; // Default 80
+                // --- CULQI IMPLEMENTATION (ACTIVE) ---
+                const { createCulqiOrder } = require('./culqiUtils');
+
+                let amount = 8000; // Default 8000 (S/ 80.00)
                 const normalizedPlan = args.planName?.toLowerCase() || '';
 
-                if (normalizedPlan.includes('2') || normalizedPlan.includes('dos')) amount = 12000;
-                else if (normalizedPlan.includes('3') || normalizedPlan.includes('tres')) amount = 15000;
-                else if (normalizedPlan.includes('clase')) amount = 600;
+                if (normalizedPlan.includes('2') || normalizedPlan.includes('dos')) amount = 12000; // S/ 120.00
+                else if (normalizedPlan.includes('3') || normalizedPlan.includes('tres')) amount = 15000; // S/ 150.00
+                else if (normalizedPlan.includes('clase')) amount = 2000; // S/ 20.00 (Example)
 
-                const session = await stripe.checkout.sessions.create({
-                    payment_method_types: ['card'],
-                    mode: 'payment',
-                    line_items: [
-                        {
-                            price_data: {
-                                currency: 'pen',
-                                product_data: {
-                                    name: args.planName || 'Plan Mensual Fit IA',
-                                },
-                                unit_amount: amount,
-                            },
-                            quantity: 1,
-                        },
-                    ],
-                    success_url: 'https://fit-ia-megagym.web.app/success', // Generic success page
-                    cancel_url: 'https://fit-ia-megagym.web.app/cancel',
-                    metadata: {
-                        phone: args.phone,
-                        planName: args.planName,
-                        source: 'whatsapp_ai'
+                // Client details (required for Culqi Anti-Fraud/Compliance)
+                const client = {
+                    first_name: 'Usuario',
+                    last_name: 'WhatsApp',
+                    email: 'cliente@whatsapp.com', // Placeholder required by Culqi
+                    phone: args.phone
+                };
+
+                // Try to populate real name/email from DB if member exists
+                try {
+                    const memSnap = await db.collection('members').where('phone', '==', args.phone).limit(1).get();
+                    if (!memSnap.empty) {
+                        const data = memSnap.docs[0].data();
+                        if (data.name) {
+                            const p = data.name.split(' ');
+                            client.first_name = p[0];
+                            client.last_name = p.slice(1).join(' ') || 'gym';
+                        }
+                        if (data.email) client.email = data.email;
                     }
-                });
+                } catch (e) { }
+
+                const order = await createCulqiOrder(
+                    amount,
+                    `Plan ${args.planName || 'Mensual'} - Fit IA`,
+                    client,
+                    { phone: args.phone, planName: args.planName, source: 'whatsapp_ai' }
+                );
+
+                // IMPORTANT: Since Culqi doesn't return a "Payment Page Link" directly via this API,
+                // we redirect the user to our own frontend page which will load the Culqi Checkout form for this Order ID.
+                // Format: https://[YOUR_DOMAIN]/pagar?orderId=[CULQI_ORDER_ID]
+
+                // Assuming "id" is the field Culqi returns (e.g., "ord_live_...")
+                const orderId = order.id;
+                if (!orderId) {
+                    throw new Error("Culqi did not return an order ID");
+                }
+
+                // Use the Firebase Hosting URL
+                const paymentUrl = `https://fit-ia-megagym.web.app/pagar?orderId=${orderId}`;
 
                 return {
-                    url: session.url,
-                    message: "Payment link generated successfully. Share this URL with the user."
+                    url: paymentUrl,
+                    message: "Link de pago (Culqi) generado. Comparte este link con el cliente."
                 };
 
             } catch (error: any) {
-                console.error("Stripe Link Error:", error);
-                return { error: "Could not generate payment link." };
+                console.error("Payment Link Error (Culqi):", error);
+                return { error: "No se pudo generar el link de pago." };
             }
 
         default:
             return { error: "Tool not found" };
     }
 }
-
