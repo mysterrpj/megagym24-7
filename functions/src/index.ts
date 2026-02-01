@@ -159,8 +159,11 @@ async function processMessage(phone: string, messageText: string) {
                     const q = await membersRef.where('phone', '==', args.phone).limit(1).get();
 
                     if (!q.empty) {
-                        await q.docs[0].ref.update({ name: args.name });
-                        return { success: true, message: "Nombre actualizado." };
+                        await q.docs[0].ref.update({
+                            name: args.name,
+                            email: args.email || ''
+                        });
+                        return { success: true, message: "Información actualizada." };
                     } else {
                         await membersRef.add({
                             phone: args.phone,
@@ -199,25 +202,36 @@ async function processMessage(phone: string, messageText: string) {
     const systemPrompt = `
     You are Sofía, the helpful and energetic AI receptionist at MegaGym ("La casa del dolor" 📍).
     Current time: ${new Date().toISOString()}.
-    
-    // ... System Prompt Abbreviated for brevity in logs (Full prompt is effectively here) ...
-    **GYM INFORMATION (Source of Truth):**
+
+    **IMPORTANT:** The user is messaging from WhatsApp. Their phone number is: ${phone}
+    USE THIS NUMBER for all registrations and payments. DO NOT ask for their phone number.
+
+    **GYM INFORMATION:**
     - **Address:** Mz I Lt 5 Montenegro, San Juan de Lurigancho.
-    - **Hours:** Monday to Saturday: 6:00 AM - 10:00 PM. Feriados: Ask for confirmation.
-    - **Prices:** 1 Month: S/ 80. 2 Months: S/ 120. 3 Months: S/ 150. Daily: S/ 6.
-    - **Payment:** If user wants to pay, call 'generate_payment_link'. Show the link.
-    
+    - **Hours:** Monday to Saturday: 6:00 AM - 10:00 PM.
+    - **Prices:** 1 Month: S/ 80. 2 Months: S/ 120. 3 Months: S/ 150.
+
     **TONE:** Friendly, energetic, use emojis. Short answers.
 
-    **RULES FOR PAYMENTS:**
-    1. If a user wants to pay/buy a plan:
-    2. CHECK if they are a registered member (use check_member_status).
-    3. IF they are NOT registered (status: 'not_found'): 
-       - ASK for their Full Name ("Nombre Completo") FIRST.
-       - ONCE they give the name, use 'register_user' to save them.
-       - THEN call 'generate_payment_link'.
-    4. IF they are ALREADY registered:
-       - Directly call 'generate_payment_link'.
+    **PAYMENT/REGISTRATION FLOW - FOLLOW EXACTLY:**
+    When user wants to pay/register for a plan:
+
+    1. Ask ONLY: "¿Cuál es tu nombre completo?" (if not given)
+    2. Ask ONLY: "¿Cuál es tu email?" (if not given, optional)
+    3. Call register_user with:
+       - phone: "${phone}" (use this exact number, DO NOT ask for it)
+       - name: what they provided
+       - email: what they provided (or empty string if none)
+    4. IMMEDIATELY call generate_payment_link with:
+       - phone: "${phone}" (use this exact number)
+       - planName: the plan they want (e.g., "Plan 1 Mes")
+    5. The link will be returned - you MUST include it in your response
+
+    CRITICAL RULES:
+    - NEVER ask for phone number (you already have it: ${phone})
+    - ALWAYS use ${phone} when calling register_user and generate_payment_link
+    - NEVER skip generate_payment_link after registering
+    - ALWAYS include the payment link in your response
     `;
 
     const response = await openai.chat.completions.create({
@@ -234,11 +248,18 @@ async function processMessage(phone: string, messageText: string) {
 
     if (responseMessage.tool_calls) {
         const toolMessages: any[] = [...messages, responseMessage];
+        let paymentLink: string | null = null;
 
         for (const toolCall of responseMessage.tool_calls) {
             const functionName = toolCall.function.name;
             const functionArgs = JSON.parse(toolCall.function.arguments);
             const functionResult = await executeTool(functionName, functionArgs);
+
+            // Capture payment link
+            if (functionName === 'generate_payment_link' && functionResult.url) {
+                paymentLink = functionResult.url;
+                console.log("✓ Payment link captured:", paymentLink);
+            }
 
             toolMessages.push({
                 tool_call_id: toolCall.id,
@@ -255,7 +276,17 @@ async function processMessage(phone: string, messageText: string) {
             ]
         });
 
-        return secondResponse.choices[0].message.content;
+        let aiResponse = secondResponse.choices[0].message.content || '';
+
+        // FORCE payment link inclusion
+        if (paymentLink) {
+            if (!aiResponse.includes(paymentLink)) {
+                console.log("⚠️ AI forgot to include link, adding it now");
+                aiResponse += `\n\n${paymentLink}`;
+            }
+        }
+
+        return aiResponse;
     }
 
     return responseMessage.content;
@@ -534,11 +565,20 @@ export const twilioWebhookWhatsapp = functions
                 timestamp: admin.firestore.FieldValue.serverTimestamp()
             });
 
-            const twiml = `
-    <Response>
-        <Message>${replyText || "Error"}</Message>
-    </Response>
-    `;
+            // Escape XML special characters to prevent TwiML errors
+            const escapeXml = (text: string) => {
+                return text
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/'/g, '&apos;');
+            };
+
+            const safeReplyText = escapeXml(replyText || "Error");
+            const twiml = `<Response><Message>${safeReplyText}</Message></Response>`;
+
+            console.log("Sending TwiML response (first 200 chars):", twiml.substring(0, 200));
 
             res.type('text/xml');
             res.send(twiml);
@@ -550,19 +590,39 @@ export const twilioWebhookWhatsapp = functions
     });
 
 // Culqi Webhook: Auto-Enrollment
+// Helper function to normalize phone numbers for consistent matching
+function normalizePhone(phone: string): string {
+    if (!phone) return '';
+    // Remove all non-digit characters
+    let digits = phone.replace(/\D/g, '');
+    // Remove country code if present (51 for Peru)
+    if (digits.startsWith('51') && digits.length > 9) {
+        digits = digits.substring(2);
+    }
+    return digits;
+}
+
+// Generate phone variants for searching
+function getPhoneVariants(phone: string): string[] {
+    const normalized = normalizePhone(phone);
+    if (!normalized) return [];
+    return [
+        normalized,                    // 951296472
+        `51${normalized}`,             // 51951296472
+        `+51${normalized}`,            // +51951296472
+        `+51 ${normalized}`,           // +51 951296472
+        phone                          // original format
+    ];
+}
+
 export const culqiWebhook = functions.https.onRequest(async (req, res) => {
-    // 1. Verify Signature (Simplified for now as we lack Secret)
-    // const signature = req.headers['x-culqi-signature']; 
-    // In production, verify signature matches payload + CULQI_WEBHOOK_SECRET
+    console.log("=== CULQI WEBHOOK CALLED ===");
+    console.log("Method:", req.method);
+    console.log("Headers:", JSON.stringify(req.headers));
 
     try {
         const event = req.body;
         console.log("Culqi Event Received:", JSON.stringify(event));
-
-        // 2. Check Event Type
-        // We look for 'order.status.changed' where state is 'paid'
-        // OR 'charge.creation.succeeded' if using direct charges.
-        // Since we create Orders, we expect order updates.
 
         let shouldProcess = false;
         let order;
@@ -570,77 +630,107 @@ export const culqiWebhook = functions.https.onRequest(async (req, res) => {
         if (event.type === 'order.status.changed' && event.data && event.data.state === 'paid') {
             shouldProcess = true;
             order = event.data;
+            console.log("Order status changed to PAID - Processing...");
         } else if (event.type === 'charge.creation.succeeded') {
-            // Sometimes charges come directly.
-            // But with Orders API, order update is better.
-            // Let's log if we see charges but not orders.
-            console.log("Charge event received (Ignored for now, focusing on Order):", event.id);
+            console.log("Charge event received:", event.id);
+            // Also process charges as backup
+            shouldProcess = true;
+            order = event.data;
+        } else {
+            console.log("Event type not processed:", event.type, "state:", event.data?.state);
         }
 
         if (shouldProcess && order) {
             const metadata = order.metadata || {};
-            const { phone, planName } = metadata;
-
-            // Client details from Order
+            const { phone: metadataPhone, planName } = metadata;
             const clientDetails = order.client_details || {};
             const customerEmail = clientDetails.email;
-            const customerName = `${clientDetails.first_name} ${clientDetails.last_name}`;
+            const customerName = `${clientDetails.first_name || ''} ${clientDetails.last_name || ''}`.trim();
 
-            if (!phone) {
-                console.log("No phone in metadata, checking client_details...");
-                // fallback
-            }
+            console.log("=== PAYMENT DATA ===");
+            console.log("Metadata phone:", metadataPhone);
+            console.log("Client details phone:", clientDetails.phone_number);
+            console.log("Plan name:", planName);
+            console.log("Customer:", customerName, customerEmail);
 
-            // 3. Database Logic (Replicated from Stripe)
             const admin = require('firebase-admin');
             if (!admin.apps.length) admin.initializeApp();
             const db = admin.firestore();
 
             let monthsToAdd = 1;
-            if (planName?.includes('2')) monthsToAdd = 2;
-            else if (planName?.includes('3')) monthsToAdd = 3;
+            if (planName?.includes('2') || planName?.toLowerCase().includes('dos')) monthsToAdd = 2;
+            else if (planName?.includes('3') || planName?.toLowerCase().includes('tres')) monthsToAdd = 3;
 
             const startDate = new Date();
             const endDate = new Date();
             endDate.setMonth(startDate.getMonth() + monthsToAdd);
 
-            const memberData = {
+            const targetPhone = metadataPhone || clientDetails.phone_number;
+            console.log("Target phone for search:", targetPhone);
+
+            // Try to find member with multiple phone variants
+            let memberRef = null;
+            let foundPhone = null;
+
+            if (targetPhone) {
+                const phoneVariants = getPhoneVariants(targetPhone);
+                console.log("Searching with phone variants:", phoneVariants);
+
+                for (const variant of phoneVariants) {
+                    const q = await db.collection('members').where('phone', '==', variant).limit(1).get();
+                    if (!q.empty) {
+                        memberRef = q.docs[0].ref;
+                        foundPhone = variant;
+                        console.log("Found member with phone variant:", variant, "Doc ID:", q.docs[0].id);
+                        break;
+                    }
+                }
+
+                if (!memberRef) {
+                    console.log("No member found with any phone variant, will create new");
+                }
+            }
+
+            const memberData: any = {
                 name: customerName || 'Nuevo Miembro (Culqi)',
-                email: customerEmail || 'no-email@provided.com',
-                phone: phone || clientDetails.phone_number || '',
-                plan: planName || 'Membresía Fit IA',
+                email: customerEmail || '',
+                phone: foundPhone || targetPhone || '',
+                plan: planName || 'Plan 1 Mes',
                 status: 'active',
                 joinDate: startDate.toISOString().split('T')[0],
                 endDate: endDate.toISOString().split('T')[0],
                 lastPaymentDate: startDate.toISOString(),
                 culqiOrderId: order.id,
-                payments: admin.firestore.FieldValue.arrayUnion({
-                    amount: order.amount ? order.amount / 100 : 0,
-                    date: new Date().toISOString(),
-                    method: 'culqi',
-                    status: 'paid'
-                })
+                paymentApprovedAt: new Date().toISOString()
             };
 
-            const targetPhone = phone || clientDetails.phone_number;
-
-            let memberRef;
-            if (targetPhone) {
-                const q = await db.collection('members').where('phone', '==', targetPhone).limit(1).get();
-                if (!q.empty) {
-                    memberRef = q.docs[0].ref;
-                }
-            }
-
             if (memberRef) {
-                await memberRef.update(memberData);
-                console.log(`Updated member (Culqi): ${memberRef.id}`);
+                // Update existing member - preserve original phone
+                delete memberData.phone;
+                await memberRef.update({
+                    ...memberData,
+                    payments: admin.firestore.FieldValue.arrayUnion({
+                        amount: order.amount ? order.amount / 100 : 0,
+                        date: new Date().toISOString(),
+                        method: 'culqi',
+                        orderId: order.id,
+                        status: 'paid'
+                    })
+                });
+                console.log(`SUCCESS: Updated member to ACTIVE: ${memberRef.id}`);
             } else {
                 const newRef = await db.collection('members').add({
                     ...memberData,
+                    payments: [{
+                        amount: order.amount ? order.amount / 100 : 0,
+                        date: new Date().toISOString(),
+                        method: 'culqi',
+                        orderId: order.id,
+                        status: 'paid'
+                    }],
                     createdAt: admin.firestore.FieldValue.serverTimestamp()
                 });
-                console.log(`Created new member (Culqi): ${newRef.id}`);
+                console.log(`SUCCESS: Created new ACTIVE member: ${newRef.id}`);
             }
         }
 
@@ -709,7 +799,7 @@ export const generateCulqiLink = functions.https.onRequest(async (req, res) => {
                     headers: {
                         'Authorization': `Bearer ${CULQI_PRIVATE_KEY}`,
                         'Content-Type': 'application/json',
-                        'Content-Length': payload.length
+                        'Content-Length': Buffer.byteLength(payload, 'utf8')
                     }
                 };
 
@@ -783,12 +873,252 @@ export const generateCulqiLink = functions.https.onRequest(async (req, res) => {
 
         if (!order.id) throw new Error("Culqi did not return an order ID");
 
-        const paymentUrl = `https://fit-ia-megagym.web.app/pagar?orderId=${order.id}`;
+        // Include phone, plan and amount in URL for the payment page
+        const paymentUrl = `https://fit-ia-megagym.web.app/pagar?orderId=${order.id}&phone=${encodeURIComponent(phone)}&plan=${encodeURIComponent(planName)}&amount=${amount}`;
 
         res.status(200).json({ url: paymentUrl });
 
     } catch (error: any) {
         console.error("Generate Link Error:", error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Manual endpoint to activate a member after payment verification
+// Usage: POST /activateMember { phone: "951296472", plan: "Plan 1 Mes" }
+export const activateMember = functions.https.onRequest(async (req, res) => {
+    res.set('Access-Control-Allow-Origin', '*');
+    if (req.method === 'OPTIONS') {
+        res.set('Access-Control-Allow-Methods', 'POST');
+        res.set('Access-Control-Allow-Headers', 'Content-Type');
+        res.status(204).send('');
+        return;
+    }
+
+    try {
+        const { phone, plan } = req.body;
+
+        if (!phone) {
+            res.status(400).json({ error: "Missing 'phone' parameter" });
+            return;
+        }
+
+        const admin = require('firebase-admin');
+        if (!admin.apps.length) admin.initializeApp();
+        const db = admin.firestore();
+
+        // Use the same phone normalization as webhook
+        const phoneVariants = getPhoneVariants(phone);
+        console.log("Activating member with phone variants:", phoneVariants);
+
+        let memberRef = null;
+        let memberData = null;
+
+        for (const variant of phoneVariants) {
+            const q = await db.collection('members').where('phone', '==', variant).limit(1).get();
+            if (!q.empty) {
+                memberRef = q.docs[0].ref;
+                memberData = q.docs[0].data();
+                console.log("Found member:", q.docs[0].id, "with phone:", variant);
+                break;
+            }
+        }
+
+        if (!memberRef) {
+            res.status(404).json({ error: "Member not found with phone: " + phone });
+            return;
+        }
+
+        const startDate = new Date();
+        const endDate = new Date();
+        let monthsToAdd = 1;
+        if (plan?.includes('2') || plan?.toLowerCase().includes('dos')) monthsToAdd = 2;
+        else if (plan?.includes('3') || plan?.toLowerCase().includes('tres')) monthsToAdd = 3;
+        endDate.setMonth(startDate.getMonth() + monthsToAdd);
+
+        await memberRef.update({
+            status: 'active',
+            plan: plan || 'Plan 1 Mes',
+            joinDate: startDate.toISOString().split('T')[0],
+            endDate: endDate.toISOString().split('T')[0],
+            lastPaymentDate: startDate.toISOString(),
+            manuallyActivatedAt: new Date().toISOString()
+        });
+
+        res.status(200).json({
+            success: true,
+            message: `Member ${memberData?.name || phone} activated successfully`,
+            plan: plan || 'Plan 1 Mes',
+            endDate: endDate.toISOString().split('T')[0]
+        });
+
+    } catch (error: any) {
+        console.error("Activate Member Error:", error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Create Culqi Charge from Token
+// This is called when the frontend receives a token instead of processing an order directly
+export const createCulqiCharge = functions.https.onRequest(async (req, res) => {
+    res.set('Access-Control-Allow-Origin', '*');
+    if (req.method === 'OPTIONS') {
+        res.set('Access-Control-Allow-Methods', 'POST');
+        res.set('Access-Control-Allow-Headers', 'Content-Type');
+        res.status(204).send('');
+        return;
+    }
+
+    try {
+        const { token, email, amount, orderId, phone, planName } = req.body;
+
+        console.log("=== CREATE CULQI CHARGE ===");
+        console.log("Token:", token);
+        console.log("Email:", email);
+        console.log("Amount:", amount);
+        console.log("OrderId:", orderId);
+        console.log("Phone:", phone);
+        console.log("Plan:", planName);
+
+        if (!token || !email || !amount) {
+            res.status(400).json({ error: "Missing required fields: token, email, amount" });
+            return;
+        }
+
+        const https = require('https');
+        const CULQI_PRIVATE_KEY = process.env.CULQI_PRIVATE_KEY;
+
+        if (!CULQI_PRIVATE_KEY) {
+            throw new Error("Server Misconfiguration: Missing CULQI_PRIVATE_KEY");
+        }
+
+        // Create charge with Culqi API
+        const chargePayload = JSON.stringify({
+            amount: amount,
+            currency_code: 'PEN',
+            email: email,
+            source_id: token,
+            description: `Membresía ${planName || 'Plan 1 Mes'} - MegaGym`,
+            metadata: {
+                phone: phone || '',
+                planName: planName || 'Plan 1 Mes',
+                orderId: orderId || '',
+                source: 'web_payment'
+            }
+        });
+
+        const chargeResult: any = await new Promise((resolve, reject) => {
+            const options = {
+                hostname: 'api.culqi.com',
+                path: '/v2/charges',
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${CULQI_PRIVATE_KEY}`,
+                    'Content-Type': 'application/json',
+                    'Content-Length': Buffer.byteLength(chargePayload, 'utf8')
+                }
+            };
+
+            const reqCulqi = https.request(options, (resCulqi: any) => {
+                let data = '';
+                resCulqi.on('data', (chunk: any) => { data += chunk; });
+                resCulqi.on('end', () => {
+                    try {
+                        const parsed = JSON.parse(data);
+                        if (resCulqi.statusCode >= 200 && resCulqi.statusCode < 300) {
+                            resolve(parsed);
+                        } else {
+                            reject(new Error(parsed.merchant_message || parsed.user_message || `Culqi Error: ${resCulqi.statusCode}`));
+                        }
+                    } catch (e) {
+                        reject(new Error('Invalid response from Culqi'));
+                    }
+                });
+            });
+
+            reqCulqi.on('error', (e: any) => reject(e));
+            reqCulqi.write(chargePayload);
+            reqCulqi.end();
+        });
+
+        console.log("Charge created successfully:", chargeResult.id);
+
+        // If charge is successful, update member immediately (don't wait for webhook)
+        if (chargeResult.id && chargeResult.outcome?.type === 'venta_exitosa') {
+            const admin = require('firebase-admin');
+            if (!admin.apps.length) admin.initializeApp();
+            const db = admin.firestore();
+
+            const targetPhone = phone;
+            if (targetPhone) {
+                const phoneVariants = getPhoneVariants(targetPhone);
+                let memberRef = null;
+
+                for (const variant of phoneVariants) {
+                    const q = await db.collection('members').where('phone', '==', variant).limit(1).get();
+                    if (!q.empty) {
+                        memberRef = q.docs[0].ref;
+                        break;
+                    }
+                }
+
+                let monthsToAdd = 1;
+                if (planName?.includes('2') || planName?.toLowerCase().includes('dos')) monthsToAdd = 2;
+                else if (planName?.includes('3') || planName?.toLowerCase().includes('tres')) monthsToAdd = 3;
+
+                const startDate = new Date();
+                const endDate = new Date();
+                endDate.setMonth(startDate.getMonth() + monthsToAdd);
+
+                const updateData = {
+                    status: 'active',
+                    plan: planName || 'Plan 1 Mes',
+                    joinDate: startDate.toISOString().split('T')[0],
+                    endDate: endDate.toISOString().split('T')[0],
+                    lastPaymentDate: startDate.toISOString(),
+                    culqiChargeId: chargeResult.id
+                };
+
+                if (memberRef) {
+                    await memberRef.update({
+                        ...updateData,
+                        payments: admin.firestore.FieldValue.arrayUnion({
+                            amount: amount / 100,
+                            date: new Date().toISOString(),
+                            method: 'culqi',
+                            chargeId: chargeResult.id,
+                            status: 'paid'
+                        })
+                    });
+                    console.log("Member updated to active");
+                } else {
+                    await db.collection('members').add({
+                        ...updateData,
+                        phone: targetPhone,
+                        email: email,
+                        name: 'Nuevo Miembro',
+                        payments: [{
+                            amount: amount / 100,
+                            date: new Date().toISOString(),
+                            method: 'culqi',
+                            chargeId: chargeResult.id,
+                            status: 'paid'
+                        }],
+                        createdAt: admin.firestore.FieldValue.serverTimestamp()
+                    });
+                    console.log("New member created as active");
+                }
+            }
+        }
+
+        res.status(200).json({
+            success: true,
+            chargeId: chargeResult.id,
+            message: "Pago procesado exitosamente"
+        });
+
+    } catch (error: any) {
+        console.error("Create Charge Error:", error);
         res.status(500).json({ error: error.message });
     }
 });
