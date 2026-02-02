@@ -12,6 +12,7 @@ import { collection, onSnapshot, query, orderBy, addDoc, updateDoc, doc, deleteD
 interface Member {
     id: string;
     name: string;
+    dni: string;
     email: string;
     phone: string;
     plan: string;
@@ -43,16 +44,17 @@ function MemberModal({
     onSubmit: (data: any) => void
 }) {
     const [name, setName] = useState(member?.name || '');
+    const [dni, setDni] = useState(member?.dni || '');
     const [email, setEmail] = useState(member?.email || '');
     const [phone, setPhone] = useState(member?.phone || '');
     const [plan, setPlan] = useState(member?.plan || 'Membresía Fit 2026');
     const [status, setStatus] = useState<'active' | 'pending' | 'prospect'>(member?.status === 'overdue' ? 'active' : (member?.status || 'active'));
 
     const handleSubmit = () => {
-        if (!name || !email || !phone) return;
+        if (!name || !phone) return;
         onSubmit({
             id: member?.id, // Pass ID if editing
-            name, email, phone, plan, status
+            name, dni, email, phone, plan, status
         });
         onClose();
     };
@@ -76,16 +78,29 @@ function MemberModal({
 
                 {/* Form */}
                 <div className="p-4 space-y-4">
-                    {/* Name */}
-                    <div>
-                        <label className="block text-sm text-gray-400 mb-2">Nombre Completo</label>
-                        <input
-                            type="text"
-                            value={name}
-                            onChange={(e) => setName(e.target.value)}
-                            placeholder="Ana Eliazar"
-                            className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-green-500 transition-colors"
-                        />
+                    {/* Name & DNI */}
+                    <div className="grid grid-cols-2 gap-3">
+                        <div>
+                            <label className="block text-sm text-gray-400 mb-2">Nombre Completo</label>
+                            <input
+                                type="text"
+                                value={name}
+                                onChange={(e) => setName(e.target.value)}
+                                placeholder="Ana Eliazar"
+                                className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-green-500 transition-colors"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm text-gray-400 mb-2">DNI</label>
+                            <input
+                                type="text"
+                                value={dni}
+                                onChange={(e) => setDni(e.target.value)}
+                                placeholder="12345678"
+                                maxLength={8}
+                                className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-green-500 transition-colors"
+                            />
+                        </div>
                     </div>
 
                     {/* Email & Phone */}
@@ -149,7 +164,7 @@ function MemberModal({
                     {/* Submit Button */}
                     <Button
                         onClick={handleSubmit}
-                        disabled={!name || !email || !phone}
+                        disabled={!name || !phone}
                         className="w-full bg-green-600 hover:bg-green-700 text-white font-medium py-2.5 mt-2 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         {member ? 'Guardar Cambios' : 'Crear Miembro'}
@@ -371,6 +386,7 @@ export function MembersPage() {
                 return {
                     id: doc.id,
                     name: data.name || 'Sin Nombre',
+                    dni: data.dni || '',
                     email: data.email || '',
                     phone: data.phone || '',
                     plan: data.plan || '',
@@ -406,6 +422,7 @@ export function MembersPage() {
             if (modalMode === 'create') {
                 await addDoc(collection(db, 'members'), {
                     name: data.name,
+                    dni: data.dni || '',
                     email: data.email,
                     phone: data.phone,
                     plan: data.plan,
@@ -415,6 +432,7 @@ export function MembersPage() {
             } else if (modalMode === 'edit' && data.id) {
                 await updateDoc(doc(db, 'members', data.id), {
                     name: data.name,
+                    dni: data.dni || '',
                     email: data.email,
                     phone: data.phone,
                     plan: data.plan,
@@ -433,6 +451,7 @@ export function MembersPage() {
     // Filter logic
     const filteredMembers = members.filter(member => {
         const matchesSearch = member.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            member.dni.includes(searchTerm) ||
             member.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
             member.phone.includes(searchTerm);
         const matchesStatus = filterStatus === 'all' || member.status === filterStatus;
@@ -474,7 +493,7 @@ export function MembersPage() {
                 <div className="relative w-full max-w-md">
                     <Search className="absolute left-3 top-3 h-4 w-4 text-gray-500" />
                     <Input
-                        placeholder="Buscar por nombre, email o teléfono..."
+                        placeholder="Buscar por nombre, DNI, email o teléfono..."
                         className="pl-9 pr-10 bg-neutral-900 border-neutral-800 text-white placeholder-gray-500 rounded-lg h-11"
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
@@ -527,7 +546,12 @@ export function MembersPage() {
                                                 <div className={cn("w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white", member.avatarColor)}>
                                                     {member.name.substring(0, 2).toUpperCase()}
                                                 </div>
-                                                <span className="text-white font-medium">{member.name}</span>
+                                                <div className="flex flex-col">
+                                                    <span className="text-white font-medium">{member.name}</span>
+                                                    {member.dni && (
+                                                        <span className="text-gray-500 text-xs">DNI: {member.dni}</span>
+                                                    )}
+                                                </div>
                                             </div>
                                         </td>
                                         <td className="px-6 py-4">

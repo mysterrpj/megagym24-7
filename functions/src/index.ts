@@ -78,15 +78,16 @@ async function processMessage(phone: string, messageText: string) {
             type: "function",
             function: {
                 name: "register_user",
-                description: "Register a new user or update their name. Use this BEFORE generating a payment link for new users.",
+                description: "Register a new user or update their info. Use this BEFORE generating a payment link for new users.",
                 parameters: {
                     type: "object",
                     properties: {
                         phone: { type: "string", description: "User phone number" },
                         name: { type: "string", description: "User's full name" },
+                        dni: { type: "string", description: "User's DNI (documento nacional de identidad)" },
                         email: { type: "string", description: "User's email (optional)" }
                     },
-                    required: ["phone", "name"]
+                    required: ["phone", "name", "dni"]
                 }
             }
         }
@@ -161,6 +162,7 @@ async function processMessage(phone: string, messageText: string) {
                     if (!q.empty) {
                         await q.docs[0].ref.update({
                             name: args.name,
+                            dni: args.dni || '',
                             email: args.email || ''
                         });
                         return { success: true, message: "Información actualizada." };
@@ -168,6 +170,7 @@ async function processMessage(phone: string, messageText: string) {
                         await membersRef.add({
                             phone: args.phone,
                             name: args.name,
+                            dni: args.dni || '',
                             email: args.email || '',
                             status: 'prospect',
                             createdAt: adminInner.firestore.FieldValue.serverTimestamp()
@@ -217,15 +220,17 @@ async function processMessage(phone: string, messageText: string) {
     When user wants to pay/register for a plan:
 
     1. Ask ONLY: "¿Cuál es tu nombre completo?" (if not given)
-    2. Ask ONLY: "¿Cuál es tu email?" (if not given, optional)
-    3. Call register_user with:
+    2. Ask ONLY: "¿Cuál es tu DNI?" (if not given, required)
+    3. Ask ONLY: "¿Cuál es tu email?" (if not given, optional)
+    4. Call register_user with:
        - phone: "${phone}" (use this exact number, DO NOT ask for it)
        - name: what they provided
+       - dni: what they provided
        - email: what they provided (or empty string if none)
-    4. IMMEDIATELY call generate_payment_link with:
+    5. IMMEDIATELY call generate_payment_link with:
        - phone: "${phone}" (use this exact number)
        - planName: the plan they want (e.g., "Plan 1 Mes")
-    5. The link will be returned - you MUST include it in your response
+    6. The link will be returned - you MUST include it in your response
 
     CRITICAL RULES:
     - NEVER ask for phone number (you already have it: ${phone})
@@ -615,6 +620,46 @@ function getPhoneVariants(phone: string): string[] {
     ];
 }
 
+// Helper function to generate and send payment voucher
+async function generateAndSendVoucher(data: {
+    customerName: string;
+    phone: string;
+    planName: string;
+    amount: number;
+    chargeId: string;
+    startDate: string;
+    endDate: string;
+    paymentMethod: string;
+}) {
+    const twilio = require('twilio');
+
+    // Create compact voucher
+    const voucherText = `✅ *PAGO CONFIRMADO - MEGAGYM*
+
+👤 ${data.customerName}
+📋 ${data.planName}
+💰 S/ ${data.amount.toFixed(2)}
+📅 Válido: ${data.startDate} al ${data.endDate}
+
+¡Gracias por tu preferencia! 💪`.trim();
+
+    console.log("📄 Generando comprobante de pago...");
+
+    // Send via WhatsApp with Twilio
+    const twilioClient = twilio(
+        process.env.TWILIO_ACCOUNT_SID,
+        process.env.TWILIO_AUTH_TOKEN
+    );
+
+    await twilioClient.messages.create({
+        from: 'whatsapp:+14155238886',
+        to: `whatsapp:${data.phone}`,
+        body: voucherText
+    });
+
+    console.log("📱 Comprobante enviado por WhatsApp a:", data.phone);
+}
+
 export const culqiWebhook = functions.https.onRequest(async (req, res) => {
     console.log("=== CULQI WEBHOOK CALLED ===");
     console.log("Method:", req.method);
@@ -633,9 +678,11 @@ export const culqiWebhook = functions.https.onRequest(async (req, res) => {
             console.log("Order status changed to PAID - Processing...");
         } else if (event.type === 'charge.creation.succeeded') {
             console.log("Charge event received:", event.id);
-            // Also process charges as backup
+            // Parse event.data if it's a string
+            const parsedData = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
             shouldProcess = true;
-            order = event.data;
+            order = parsedData;
+            console.log("Parsed charge data:", JSON.stringify(parsedData).substring(0, 200));
         } else {
             console.log("Event type not processed:", event.type, "state:", event.data?.state);
         }
@@ -691,10 +738,8 @@ export const culqiWebhook = functions.https.onRequest(async (req, res) => {
                 }
             }
 
-            const memberData: any = {
-                name: customerName || 'Nuevo Miembro (Culqi)',
-                email: customerEmail || '',
-                phone: foundPhone || targetPhone || '',
+            // Datos de membresía (siempre se actualizan)
+            const membershipData: any = {
                 plan: planName || 'Plan 1 Mes',
                 status: 'active',
                 joinDate: startDate.toISOString().split('T')[0],
@@ -705,10 +750,34 @@ export const culqiWebhook = functions.https.onRequest(async (req, res) => {
             };
 
             if (memberRef) {
-                // Update existing member - preserve original phone
-                delete memberData.phone;
+                // Update existing member - preserve name/email if already set
+                const existingDoc = await memberRef.get();
+                const existingData = existingDoc.data() || {};
+
+                const updateData: any = { ...membershipData };
+
+                // Solo actualizar name si el existente está vacío o es genérico
+                const genericNames = ['nuevo miembro', 'nuevo miembro (culqi)', 'usuario', 'cliente'];
+                const existingNameIsGeneric = !existingData.name ||
+                    genericNames.includes(existingData.name.toLowerCase().trim());
+
+                if (existingNameIsGeneric && customerName) {
+                    updateData.name = customerName;
+                    console.log(`Updating name from "${existingData.name}" to "${customerName}"`);
+                } else {
+                    console.log(`Preserving existing name: "${existingData.name}"`);
+                }
+
+                // Solo actualizar email si el existente está vacío
+                if (!existingData.email && customerEmail) {
+                    updateData.email = customerEmail;
+                    console.log(`Updating email to "${customerEmail}"`);
+                } else {
+                    console.log(`Preserving existing email: "${existingData.email}"`);
+                }
+
                 await memberRef.update({
-                    ...memberData,
+                    ...updateData,
                     payments: admin.firestore.FieldValue.arrayUnion({
                         amount: order.amount ? order.amount / 100 : 0,
                         date: new Date().toISOString(),
@@ -719,8 +788,13 @@ export const culqiWebhook = functions.https.onRequest(async (req, res) => {
                 });
                 console.log(`SUCCESS: Updated member to ACTIVE: ${memberRef.id}`);
             } else {
+                // Create new member - usar datos del webhook ya que no existe registro previo
                 const newRef = await db.collection('members').add({
-                    ...memberData,
+                    name: customerName || 'Nuevo Miembro (Culqi)',
+                    dni: '',
+                    email: customerEmail || '',
+                    phone: foundPhone || targetPhone || '',
+                    ...membershipData,
                     payments: [{
                         amount: order.amount ? order.amount / 100 : 0,
                         date: new Date().toISOString(),
@@ -731,6 +805,37 @@ export const culqiWebhook = functions.https.onRequest(async (req, res) => {
                     createdAt: admin.firestore.FieldValue.serverTimestamp()
                 });
                 console.log(`SUCCESS: Created new ACTIVE member: ${newRef.id}`);
+            }
+
+            // Obtener el nombre final del miembro para el comprobante
+            let finalCustomerName = customerName || 'Cliente';
+            if (memberRef) {
+                const updatedDoc = await memberRef.get();
+                const updatedData = updatedDoc.data();
+                if (updatedData?.name) {
+                    finalCustomerName = updatedData.name;
+                }
+            }
+
+            // Generar y enviar comprobante de pago por WhatsApp
+            if (targetPhone && finalCustomerName) {
+                try {
+                    console.log("📄 Generando comprobante de pago...");
+                    await generateAndSendVoucher({
+                        customerName: finalCustomerName,
+                        phone: targetPhone,
+                        planName: planName || 'Plan 1 Mes',
+                        amount: order.amount ? order.amount / 100 : 0,
+                        chargeId: order.id,
+                        startDate: startDate.toISOString().split('T')[0],
+                        endDate: endDate.toISOString().split('T')[0],
+                        paymentMethod: 'Culqi'
+                    });
+                    console.log("✅ Comprobante enviado por WhatsApp");
+                } catch (voucherError: any) {
+                    console.error("❌ Error enviando comprobante:", voucherError);
+                    // No lanzar error para no bloquear el flujo principal
+                }
             }
         }
 
@@ -1091,6 +1196,27 @@ export const createCulqiCharge = functions.https.onRequest(async (req, res) => {
                         })
                     });
                     console.log("Member updated to active");
+
+                    // Get member name for voucher
+                    const memberData = (await memberRef.get()).data();
+                    const customerName = memberData?.name || 'Cliente';
+
+                    // Generate and send voucher
+                    try {
+                        await generateAndSendVoucher({
+                            customerName: customerName,
+                            phone: targetPhone,
+                            planName: planName || 'Plan 1 Mes',
+                            amount: amount / 100,
+                            chargeId: chargeResult.id,
+                            startDate: startDate.toISOString().split('T')[0],
+                            endDate: endDate.toISOString().split('T')[0],
+                            paymentMethod: 'Culqi'
+                        });
+                        console.log("✅ Comprobante enviado");
+                    } catch (voucherError: any) {
+                        console.error("❌ Error enviando comprobante:", voucherError);
+                    }
                 } else {
                     await db.collection('members').add({
                         ...updateData,
@@ -1107,6 +1233,23 @@ export const createCulqiCharge = functions.https.onRequest(async (req, res) => {
                         createdAt: admin.firestore.FieldValue.serverTimestamp()
                     });
                     console.log("New member created as active");
+
+                    // Generate and send voucher for new member
+                    try {
+                        await generateAndSendVoucher({
+                            customerName: 'Nuevo Miembro',
+                            phone: targetPhone,
+                            planName: planName || 'Plan 1 Mes',
+                            amount: amount / 100,
+                            chargeId: chargeResult.id,
+                            startDate: startDate.toISOString().split('T')[0],
+                            endDate: endDate.toISOString().split('T')[0],
+                            paymentMethod: 'Culqi'
+                        });
+                        console.log("✅ Comprobante enviado");
+                    } catch (voucherError: any) {
+                        console.error("❌ Error enviando comprobante:", voucherError);
+                    }
                 }
             }
         }
