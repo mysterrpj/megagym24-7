@@ -63,14 +63,17 @@ async function processMessage(phone: string, messageText: string) {
             type: "function",
             function: {
                 name: "generate_payment_link",
-                description: "Generate a payment link (Culqi) for a specific plan. Use this when the user wants to pay.",
+                description: "Generate a payment link (Culqi) for a specific plan. IMPORTANT: You MUST have the user's full name, DNI, and email BEFORE calling this function. If you don't have these, ASK THE USER FIRST.",
                 parameters: {
                     type: "object",
                     properties: {
-                        phone: { type: "string", description: "User's phone number to link the payment" },
-                        planName: { type: "string", description: "Name of the plan (e.g., '1 Month', '2 Months')" }
+                        phone: { type: "string", description: "User's phone number" },
+                        planName: { type: "string", description: "Name of the plan (e.g., 'Plan 1 Mes', 'Plan 2 Meses')" },
+                        customerName: { type: "string", description: "User's FULL NAME (required - ask if not provided)" },
+                        dni: { type: "string", description: "User's DNI document number (required - ask if not provided)" },
+                        email: { type: "string", description: "User's email address (required - ask if not provided)" }
                     },
-                    required: ["phone", "planName"]
+                    required: ["phone", "planName", "customerName", "dni", "email"]
                 }
             }
         },
@@ -142,10 +145,20 @@ async function processMessage(phone: string, messageText: string) {
 
             case 'generate_payment_link':
                 try {
+                    // Validate required fields
+                    if (!args.customerName || !args.dni || !args.email) {
+                        return { error: "Faltan datos obligatorios. Necesito: nombre completo, DNI y email del cliente." };
+                    }
                     const response = await fetch('https://us-central1-fit-ia-megagym.cloudfunctions.net/generateCulqiLink', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ phone: args.phone, planName: args.planName })
+                        body: JSON.stringify({
+                            phone: args.phone,
+                            planName: args.planName,
+                            customerName: args.customerName,
+                            dni: args.dni,
+                            email: args.email
+                        })
                     });
                     const data: any = await response.json();
                     if (!response.ok) throw new Error(data.error || "Error connecting to payment service");
@@ -203,40 +216,41 @@ async function processMessage(phone: string, messageText: string) {
     messages.push({ role: 'user', content: messageText });
 
     const systemPrompt = `
-    You are Sofía, the helpful and energetic AI receptionist at MegaGym ("La casa del dolor" 📍).
+    You are Sofía, the helpful and energetic AI receptionist at MegaGym ("La casa del dolor" 💪).
     Current time: ${new Date().toISOString()}.
 
     **IMPORTANT:** The user is messaging from WhatsApp. Their phone number is: ${phone}
-    USE THIS NUMBER for all registrations and payments. DO NOT ask for their phone number.
+    USE THIS NUMBER for all operations. NEVER ask for their phone number.
 
     **GYM INFORMATION:**
     - **Address:** Mz I Lt 5 Montenegro, San Juan de Lurigancho.
     - **Hours:** Monday to Saturday: 6:00 AM - 10:00 PM.
-    - **Prices:** 1 Month: S/ 80. 2 Months: S/ 120. 3 Months: S/ 150.
+    - **Prices:** Plan 1 Mes: S/ 80. Plan 2 Meses: S/ 120. Plan 3 Meses: S/ 150.
 
-    **TONE:** Friendly, energetic, use emojis. Short answers.
+    **TONE:** Friendly, energetic, use emojis. Short answers in Spanish.
 
-    **PAYMENT/REGISTRATION FLOW - FOLLOW EXACTLY:**
-    When user wants to pay/register for a plan:
+    **MANDATORY PAYMENT FLOW - YOU MUST FOLLOW THIS EXACTLY:**
 
-    1. Ask ONLY: "¿Cuál es tu nombre completo?" (if not given)
-    2. Ask ONLY: "¿Cuál es tu DNI?" (if not given, required)
-    3. Ask ONLY: "¿Cuál es tu email?" (if not given, optional)
-    4. Call register_user with:
-       - phone: "${phone}" (use this exact number, DO NOT ask for it)
-       - name: what they provided
-       - dni: what they provided
-       - email: what they provided (or empty string if none)
-    5. IMMEDIATELY call generate_payment_link with:
-       - phone: "${phone}" (use this exact number)
-       - planName: the plan they want (e.g., "Plan 1 Mes")
-    6. The link will be returned - you MUST include it in your response
+    When the user wants to pay, register, or get a membership, you MUST collect ALL of the following information BEFORE generating any payment link:
 
-    CRITICAL RULES:
-    - NEVER ask for phone number (you already have it: ${phone})
-    - ALWAYS use ${phone} when calling register_user and generate_payment_link
-    - NEVER skip generate_payment_link after registering
-    - ALWAYS include the payment link in your response
+    STEP 1: Ask "¿Cuál es tu nombre completo?" - WAIT for response
+    STEP 2: Ask "¿Cuál es tu DNI?" - WAIT for response
+    STEP 3: Ask "¿Cuál es tu correo electrónico?" - WAIT for response
+
+    ONLY after you have ALL THREE pieces of information (name, DNI, email), then:
+
+    STEP 4: Call register_user with: phone="${phone}", name, dni, email
+    STEP 5: Call generate_payment_link with: phone="${phone}", planName, customerName, dni, email
+    STEP 6: Send the payment link to the user
+
+    **CRITICAL RULES:**
+    - NEVER generate a payment link without first having: nombre completo, DNI, and email
+    - NEVER skip asking for ANY of these 3 pieces of information
+    - NEVER use placeholder data like "Usuario", "Nuevo Miembro", or "cliente@whatsapp.com"
+    - Ask ONE question at a time and WAIT for the user's response
+    - If the user tries to skip a question, politely insist that you need the information
+    - The phone number is: ${phone} - use this, NEVER ask for it
+    - ALWAYS respond in Spanish
     `;
 
     const response = await openai.chat.completions.create({
@@ -541,28 +555,35 @@ async function processMessage(phone: string, messageText: string) {
 //         }
 
 export const twilioWebhookWhatsapp = functions
-    .runWith({ memory: '512MB', timeoutSeconds: 60 })
+    .runWith({ memory: '512MB', timeoutSeconds: 120 })
     .https.onRequest(async (req, res) => {
         const admin = require('firebase-admin');
         if (!admin.apps.length) admin.initializeApp();
         const db = admin.firestore();
+        const twilio = require('twilio');
 
         const incomingMsg = req.body.Body;
-        const from = req.body.From;
+        const from = req.body.From; // formato: whatsapp:+51951296572
         const phone = from ? from.replace('whatsapp:', '') : 'unknown';
 
-        console.log(`Msg from ${phone}: ${incomingMsg}`);
+        console.log(`📩 Msg from ${phone}: ${incomingMsg}`);
 
         try {
+            // Guardar mensaje entrante
             await db.collection('messages').add({
                 phone: phone,
                 content: incomingMsg || '',
                 direction: 'inbound',
                 timestamp: admin.firestore.FieldValue.serverTimestamp()
             });
+            console.log("💾 Mensaje entrante guardado");
 
+            // Procesar mensaje con IA
+            console.log("🤖 Procesando con IA...");
             const replyText = await processMessage(phone, incomingMsg || '');
+            console.log("🤖 Respuesta:", (replyText || "").substring(0, 100));
 
+            // Guardar respuesta
             await db.collection('messages').add({
                 phone: phone,
                 content: replyText || "Lo siento, tuve un error.",
@@ -570,26 +591,26 @@ export const twilioWebhookWhatsapp = functions
                 timestamp: admin.firestore.FieldValue.serverTimestamp()
             });
 
-            // Escape XML special characters to prevent TwiML errors
-            const escapeXml = (text: string) => {
-                return text
-                    .replace(/&/g, '&amp;')
-                    .replace(/</g, '&lt;')
-                    .replace(/>/g, '&gt;')
-                    .replace(/"/g, '&quot;')
-                    .replace(/'/g, '&apos;');
-            };
+            // Enviar mensaje usando la API de Twilio
+            console.log("📤 Enviando via Twilio...");
+            const twilioClient = twilio(
+                process.env.TWILIO_ACCOUNT_SID,
+                process.env.TWILIO_AUTH_TOKEN
+            );
 
-            const safeReplyText = escapeXml(replyText || "Error");
-            const twiml = `<Response><Message>${safeReplyText}</Message></Response>`;
+            const message = await twilioClient.messages.create({
+                from: 'whatsapp:+14155238886',
+                to: from,
+                body: replyText || "Lo siento, tuve un error."
+            });
 
-            console.log("Sending TwiML response (first 200 chars):", twiml.substring(0, 200));
+            console.log("✅ Enviado! SID:", message.sid);
 
-            res.type('text/xml');
-            res.send(twiml);
+            // Responder OK a Twilio DESPUÉS de enviar el mensaje
+            res.status(200).send('OK');
 
-        } catch (error) {
-            console.error('Error:', error);
+        } catch (error: any) {
+            console.error('❌ Error:', error.message || error);
             res.status(500).send('Error');
         }
     });
@@ -671,18 +692,21 @@ export const culqiWebhook = functions.https.onRequest(async (req, res) => {
 
         let shouldProcess = false;
         let order;
+        let isOrderPayment = false; // true = PagoEfectivo, false = Tarjeta
 
         if (event.type === 'order.status.changed' && event.data && event.data.state === 'paid') {
             shouldProcess = true;
             order = event.data;
-            console.log("Order status changed to PAID - Processing...");
+            isOrderPayment = true; // Es PagoEfectivo - SÍ enviar voucher desde aquí
+            console.log("Order status changed to PAID (PagoEfectivo) - Processing...");
         } else if (event.type === 'charge.creation.succeeded') {
             console.log("Charge event received:", event.id);
             // Parse event.data if it's a string
             const parsedData = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
             shouldProcess = true;
             order = parsedData;
-            console.log("Parsed charge data:", JSON.stringify(parsedData).substring(0, 200));
+            isOrderPayment = false; // Es Tarjeta - NO enviar voucher (ya lo hace createCulqiCharge)
+            console.log("Parsed charge data (voucher ya enviado por createCulqiCharge):", JSON.stringify(parsedData).substring(0, 200));
         } else {
             console.log("Event type not processed:", event.type, "state:", event.data?.state);
         }
@@ -818,9 +842,11 @@ export const culqiWebhook = functions.https.onRequest(async (req, res) => {
             }
 
             // Generar y enviar comprobante de pago por WhatsApp
-            if (targetPhone && finalCustomerName) {
+            // SOLO para PagoEfectivo (isOrderPayment=true)
+            // Para tarjeta, el voucher ya se envía desde createCulqiCharge
+            if (isOrderPayment && targetPhone && finalCustomerName) {
                 try {
-                    console.log("📄 Generando comprobante de pago...");
+                    console.log("📄 Generando comprobante de pago (PagoEfectivo)...");
                     await generateAndSendVoucher({
                         customerName: finalCustomerName,
                         phone: targetPhone,
@@ -836,6 +862,8 @@ export const culqiWebhook = functions.https.onRequest(async (req, res) => {
                     console.error("❌ Error enviando comprobante:", voucherError);
                     // No lanzar error para no bloquear el flujo principal
                 }
+            } else if (!isOrderPayment) {
+                console.log("ℹ️ Voucher no enviado desde webhook (tarjeta) - ya fue enviado por createCulqiCharge");
             }
         }
 
@@ -862,10 +890,15 @@ export const generateCulqiLink = functions.https.onRequest(async (req, res) => {
     }
 
     try {
-        const { phone, planName } = req.body;
+        const { phone, planName, customerName, dni, email } = req.body;
 
         if (!phone || !planName) {
             res.status(400).json({ error: "Missing 'phone' or 'planName'." });
+            return;
+        }
+
+        if (!customerName || !dni || !email) {
+            res.status(400).json({ error: "Missing required customer data: 'customerName', 'dni', or 'email'." });
             return;
         }
 
@@ -940,40 +973,52 @@ export const generateCulqiLink = functions.https.onRequest(async (req, res) => {
         else if (normalizedPlan.includes('3') || normalizedPlan.includes('tres')) amount = 15000;
         else if (normalizedPlan.includes('clase')) amount = 2000;
 
-        // Fetch real client data from Firestore
+        // Use client data passed directly from the bot
+        const nameParts = customerName.trim().split(' ');
+        const client = {
+            first_name: nameParts[0] || customerName,
+            last_name: nameParts.slice(1).join(' ') || customerName,
+            email: email,
+            phone: phone
+        };
+
+        // Also save/update the member in Firestore with the collected data
         const admin = require('firebase-admin');
         if (!admin.apps.length) admin.initializeApp();
         const db = admin.firestore();
 
-        const client = {
-            first_name: 'Usuario',
-            last_name: 'WhatsApp',
-            email: 'cliente@whatsapp.com',
-            phone: phone
-        };
-
         try {
             const membersSnap = await db.collection('members').where('phone', '==', phone).limit(1).get();
             if (!membersSnap.empty) {
-                const member = membersSnap.docs[0].data();
-                if (member.name) {
-                    const names = member.name.split(' ');
-                    client.first_name = names[0];
-                    client.last_name = names.slice(1).join(' ') || 'WhatsApp';
-                }
-                if (member.email) {
-                    client.email = member.email;
-                }
+                // Update existing member
+                await membersSnap.docs[0].ref.update({
+                    name: customerName,
+                    dni: dni,
+                    email: email
+                });
+                console.log("Updated existing member with new data");
+            } else {
+                // Create new member
+                await db.collection('members').add({
+                    phone: phone,
+                    name: customerName,
+                    dni: dni,
+                    email: email,
+                    status: 'prospect',
+                    createdAt: admin.firestore.FieldValue.serverTimestamp()
+                });
+                console.log("Created new member with provided data");
             }
         } catch (dbError) {
-            console.error("Firestore lookup error (using defaults):", dbError);
+            console.error("Firestore save error:", dbError);
+            // Continue anyway - payment link generation should not fail due to DB error
         }
 
         const order: any = await createCulqiOrder(
             amount,
             `Plan ${planName} - Fit IA`,
             client,
-            { phone, planName, source: 'whatsapp_ai' }
+            { phone, planName, customerName, dni, email, source: 'whatsapp_ai' }
         );
 
         if (!order.id) throw new Error("Culqi did not return an order ID");
