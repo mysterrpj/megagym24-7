@@ -19,6 +19,11 @@ interface Member {
     joinDate: string;
     status: 'active' | 'pending' | 'overdue' | 'prospect';
     avatarColor: string;
+    amountPaid?: number;
+    planPrice?: number;
+    expirationDate?: string;
+    rawJoinDate?: any;
+    expirationDateObj?: Date;
 }
 
 // Stats Card Component
@@ -48,13 +53,100 @@ function MemberModal({
     const [email, setEmail] = useState(member?.email || '');
     const [phone, setPhone] = useState(member?.phone || '');
     const [plan, setPlan] = useState(member?.plan || 'Membresía Fit 2026');
-    const [status, setStatus] = useState<'active' | 'pending' | 'prospect'>(member?.status === 'overdue' ? 'active' : (member?.status || 'active'));
+    const [status, setStatus] = useState<'active' | 'pending' | 'prospect' | 'overdue'>(member?.status === 'overdue' ? 'overdue' : (member?.status || 'active'));
+
+    // Payment fields
+    const [planPrice, setPlanPrice] = useState(member?.planPrice?.toString() || '80');
+    const [amountPaid, setAmountPaid] = useState(member?.amountPaid?.toString() || '80');
+
+    // Join Date State (New)
+    const [joinDate, setJoinDate] = useState(() => {
+        if (member?.rawJoinDate?.toDate) {
+            return member.rawJoinDate.toDate().toISOString().split('T')[0];
+        } else if (member?.joinDate && member.joinDate !== 'Reciente') {
+            // Try to parse '16 feb 2026' back to date? Tricky with locale. 
+            // Better strictly use rawJoinDate if available, or Today.
+            // If we are editing but no raw date (shouldn't happen), assume today or leave blank?
+            // Let's assume Today for new, and safe fallback.
+            return new Date().toISOString().split('T')[0];
+        }
+        return new Date().toISOString().split('T')[0];
+    });
+
+    const [expirationDate, setExpirationDate] = useState(() => {
+        if (member?.expirationDateObj) {
+            return member.expirationDateObj.toISOString().split('T')[0];
+        }
+        // Default: Next Month
+        const d = new Date();
+        d.setMonth(d.getMonth() + 1);
+        return d.toISOString().split('T')[0];
+    });
+
+    // Update expiration date if plan changes (only if not editing an existing member initially to avoid overwrite, 
+    // BUT user asked for auto-calc. Let's make it recalculate on plan change).
+    // We need to differentiate "initial load" from "user changed plan".
+
+    // Auto-update expiration date based on PLAN and JOIN DATE
+    useEffect(() => {
+        // Calculate based on JOIN DATE, not just "today"
+        const [y, m, d] = joinDate.split('-').map(Number);
+        const baseDate = new Date(y, m - 1, d);
+
+        const newDate = new Date(baseDate);
+        if (plan.includes('Trimestral')) newDate.setMonth(newDate.getMonth() + 3);
+        else if (plan.includes('Mensual')) newDate.setMonth(newDate.getMonth() + 1);
+        else newDate.setFullYear(newDate.getFullYear() + 1);
+
+        // Only update if the plan actually CHANGED from the initial member plan OR if it's a new member OR if join date changed
+        // We want to be helpful but not annoying. If I change join date, expiration SHOULD change 99% of time.
+        // If I change plan, expiration SHOULD change.
+        // Let's just update it. The user can manually fix expiration afterwards if they want special case.
+        setExpirationDate(newDate.toISOString().split('T')[0]);
+
+    }, [plan, joinDate]);
+
+    // Update price based on plan selection
+    useEffect(() => {
+        if (!member) { // Only on create
+            if (plan.includes('Trimestral')) setPlanPrice('150');
+            else if (plan.includes('Mensual')) setPlanPrice('80');
+            else setPlanPrice('80');
+        }
+    }, [plan, member]);
+
+    // Auto-update status based on expiration date
+    useEffect(() => {
+        if (!expirationDate) return;
+
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        // Parse expirationDate string (YYYY-MM-DD) to Date object in local time
+        const [y, m, d] = expirationDate.split('-').map(Number);
+        const expDate = new Date(y, m - 1, d);
+        expDate.setHours(0, 0, 0, 0);
+
+        if (expDate < today) {
+            setStatus('overdue');
+        } else {
+            // If date is valid (future/today), change to active
+            setStatus('active');
+        }
+    }, [expirationDate]);
+
+    const debt = Math.max(0, (parseFloat(planPrice) || 0) - (parseFloat(amountPaid) || 0));
 
     const handleSubmit = () => {
         if (!name || !phone) return;
         onSubmit({
             id: member?.id, // Pass ID if editing
-            name, dni, email, phone, plan, status
+            name, dni, email, phone, plan, status,
+            amountPaid: parseFloat(amountPaid) || 0,
+            planPrice: parseFloat(planPrice) || 0,
+            expirationDateStr: expirationDate, // Pass string 'YYYY-MM-DD'
+            joinDateStr: joinDate, // Pass string 'YYYY-MM-DD'
+            debt: debt
         });
         onClose();
     };
@@ -157,19 +249,73 @@ function MemberModal({
                                 <option value="active">Activo</option>
                                 <option value="pending">Pendiente</option>
                                 <option value="prospect">Prospecto</option>
+                                <option value="overdue">Vencido</option>
                             </select>
                         </div>
                     </div>
 
-                    {/* Submit Button */}
-                    <Button
-                        onClick={handleSubmit}
-                        disabled={!name || !phone}
-                        className="w-full bg-green-600 hover:bg-green-700 text-white font-medium py-2.5 mt-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        {member ? 'Guardar Cambios' : 'Crear Miembro'}
-                    </Button>
                 </div>
+
+                {/* Dates */}
+                <div className="grid grid-cols-2 gap-3">
+                    <div>
+                        <label className="block text-sm text-gray-400 mb-2">Fecha de Ingreso</label>
+                        <input
+                            type="date"
+                            value={joinDate}
+                            onChange={(e) => setJoinDate(e.target.value)}
+                            className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:border-green-500 transition-colors"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm text-gray-400 mb-2">Fecha de Vencimiento</label>
+                        <input
+                            type="date"
+                            value={expirationDate}
+                            onChange={(e) => setExpirationDate(e.target.value)}
+                            className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:border-green-500 transition-colors"
+                        />
+                    </div>
+                </div>
+
+                {/* Payment Info (New for Partial Payments) */}
+                <div className="grid grid-cols-2 gap-3 bg-neutral-800/50 p-3 rounded-lg border border-neutral-700/50">
+                    <div>
+                        <label className="block text-xs text-gray-400 mb-1">Costo Plan (S/)</label>
+                        <input
+                            type="number"
+                            value={planPrice}
+                            onChange={(e) => setPlanPrice(e.target.value)}
+                            className="w-full bg-neutral-900 border border-neutral-700 rounded-md px-2 py-1.5 text-white text-sm focus:outline-none focus:border-green-500"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-xs text-gray-400 mb-1">Monto Pagado (S/)</label>
+                        <input
+                            type="number"
+                            value={amountPaid}
+                            onChange={(e) => setAmountPaid(e.target.value)}
+                            className={cn(
+                                "w-full bg-neutral-900 border border-neutral-700 rounded-md px-2 py-1.5 text-white text-sm focus:outline-none focus:border-green-500",
+                                debt > 0 ? "border-red-500/50 focus:border-red-500" : "border-green-500/50"
+                            )}
+                        />
+                    </div>
+                    {debt > 0 && (
+                        <div className="col-span-2 text-center bg-red-500/10 border border-red-500/20 rounded-md py-1">
+                            <p className="text-xs text-red-500 font-bold">⚠️ Deuda Pendiente: S/ {debt.toFixed(2)}</p>
+                        </div>
+                    )}
+                </div>
+
+                {/* Submit Button */}
+                <Button
+                    onClick={handleSubmit}
+                    disabled={!name || !phone}
+                    className="w-full bg-green-600 hover:bg-green-700 text-white font-medium py-2.5 mt-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    {member ? 'Guardar Cambios' : 'Crear Miembro'}
+                </Button>
             </div>
         </div>
     );
@@ -383,6 +529,30 @@ export function MembersPage() {
         const unsubscribe = onSnapshot(q, (snapshot) => {
             const fetchedMembers: Member[] = snapshot.docs.map(doc => {
                 const data = doc.data();
+                // Calculate Expiration
+                let expirationDate = 'Sin fecha';
+                const created = data.createdAt?.toDate ? data.createdAt.toDate() : new Date();
+                const planName = (data.plan || '').toLowerCase();
+
+                let expDateObj = new Date(); // Default
+
+                if (data.expirationDate?.toDate) {
+                    // Use saved expiration date if available
+                    expDateObj = data.expirationDate.toDate();
+                } else {
+                    // Fallback to calculation
+                    expDateObj = new Date(created);
+                    if (planName.includes('trimestral')) {
+                        expDateObj.setMonth(expDateObj.getMonth() + 3);
+                    } else if (planName.includes('mensual')) {
+                        expDateObj.setMonth(expDateObj.getMonth() + 1);
+                    } else {
+                        expDateObj.setFullYear(expDateObj.getFullYear() + 1); // Default 1 year for others
+                    }
+                }
+
+                expirationDate = expDateObj.toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' });
+
                 return {
                     id: doc.id,
                     name: data.name || 'Sin Nombre',
@@ -392,7 +562,12 @@ export function MembersPage() {
                     plan: data.plan || '',
                     joinDate: data.createdAt?.toDate().toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' }) || 'Reciente',
                     status: data.status || 'prospect',
-                    avatarColor: `bg-${['green', 'blue', 'purple', 'orange', 'pink'][Math.floor(Math.random() * 5)]}-600`
+                    avatarColor: `bg-${['green', 'blue', 'purple', 'orange', 'pink'][Math.floor(Math.random() * 5)]}-600`,
+                    amountPaid: data.amountPaid,
+                    planPrice: data.planPrice,
+                    expirationDate,
+                    expirationDateObj: expDateObj,
+                    rawJoinDate: data.createdAt
                 };
             });
             setMembers(fetchedMembers);
@@ -419,6 +594,14 @@ export function MembersPage() {
 
     const handleCreateOrUpdateMember = async (data: any) => {
         try {
+            // Fix Date Timezone Issue for Expiration
+            const [y, m, d] = data.expirationDateStr ? data.expirationDateStr.split('-').map(Number) : [0, 0, 0];
+            const expirationDateObj = data.expirationDateStr ? new Date(y, m - 1, d) : null;
+
+            // Fix Date Timezone Issue for Join Date (createdAt)
+            const [jy, jm, jd] = data.joinDateStr ? data.joinDateStr.split('-').map(Number) : [0, 0, 0];
+            const joinDateObj = data.joinDateStr ? new Date(jy, jm - 1, jd) : new Date();
+
             if (modalMode === 'create') {
                 await addDoc(collection(db, 'members'), {
                     name: data.name,
@@ -427,7 +610,10 @@ export function MembersPage() {
                     phone: data.phone,
                     plan: data.plan,
                     status: data.status,
-                    createdAt: serverTimestamp()
+                    amountPaid: data.amountPaid,
+                    planPrice: data.planPrice,
+                    expirationDate: expirationDateObj, // Save Date
+                    createdAt: joinDateObj // Save User Selected Date
                 });
             } else if (modalMode === 'edit' && data.id) {
                 await updateDoc(doc(db, 'members', data.id), {
@@ -437,9 +623,14 @@ export function MembersPage() {
                     phone: data.phone,
                     plan: data.plan,
                     status: data.status,
+                    amountPaid: data.amountPaid,
+                    planPrice: data.planPrice,
+                    expirationDate: expirationDateObj, // Save Date
+                    createdAt: joinDateObj, // Update Join Date too if edited
                     updatedAt: serverTimestamp()
                 });
             }
+
         } catch (error) {
             console.error("Error saving member:", error);
             alert("Error al guardar el miembro.");
@@ -534,6 +725,7 @@ export function MembersPage() {
                                     <th className="px-6 py-4 font-medium">Contacto</th>
                                     <th className="px-6 py-4 font-medium">Plan</th>
                                     <th className="px-6 py-4 font-medium">Ingreso</th>
+                                    <th className="px-6 py-4 font-medium">Vencimiento</th>
                                     <th className="px-6 py-4 font-medium">Estado</th>
                                     <th className="px-6 py-4 font-medium text-right"></th>
                                 </tr>
@@ -572,6 +764,9 @@ export function MembersPage() {
                                         <td className="px-6 py-4 text-gray-300">
                                             {member.joinDate}
                                         </td>
+                                        <td className="px-6 py-4 text-gray-300">
+                                            {member.expirationDate}
+                                        </td>
                                         <td className="px-6 py-4">
                                             <span className={cn(
                                                 "px-3 py-1 rounded-full text-xs font-medium border",
@@ -584,6 +779,13 @@ export function MembersPage() {
                                                     member.status === 'pending' ? 'Pendiente' :
                                                         member.status === 'prospect' ? 'Prospecto' : 'Vencido'}
                                             </span>
+                                            {(member.planPrice && member.amountPaid && member.planPrice > member.amountPaid) ? (
+                                                <div className="mt-1">
+                                                    <span className="text-[10px] bg-red-500 text-white px-2 py-0.5 rounded-full font-bold">
+                                                        Debe: S/ {(member.planPrice - member.amountPaid)}
+                                                    </span>
+                                                </div>
+                                            ) : null}
                                         </td>
                                         <td className="px-6 py-4 text-right">
                                             <MemberActionsMenu

@@ -1,7 +1,9 @@
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Check, Plus, X, MoreHorizontal, Edit2, Trash2, Users } from 'lucide-react';
-import { useState, KeyboardEvent } from 'react';
+import { Check, Plus, X, MoreHorizontal, Edit2, Trash2, Users, Loader2 } from 'lucide-react';
+import { useState, KeyboardEvent, useEffect } from 'react';
+import { collection, onSnapshot, addDoc, deleteDoc, doc, serverTimestamp, query, where } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 
 // Type definitions
 interface Membership {
@@ -14,35 +16,14 @@ interface Membership {
     status: 'active' | 'inactive';
 }
 
-// Sample memberships
-const sampleMemberships: Membership[] = [
-    {
-        id: '1',
-        name: 'Plan Mensual',
-        price: 80,
-        duration: 30,
-        benefits: ['Acceso ilimitado', 'Uso de duchas', 'App Fit IA'],
-        activeMembers: 45,
-        status: 'active'
-    },
-    {
-        id: '2',
-        name: 'Plan Trimestral',
-        price: 150,
-        duration: 90,
-        benefits: ['Acceso ilimitado', 'Uso de duchas', 'App Fit IA', 'Clases grupales', 'Nutriólogo'],
-        activeMembers: 28,
-        status: 'active'
-    },
-];
-
 // Create Membership Modal Component
-function CreateMembershipModal({ onClose, onSubmit }: { onClose: () => void; onSubmit: (membership: Omit<Membership, 'id' | 'activeMembers' | 'status'>) => void }) {
+function CreateMembershipModal({ onClose, onSubmit }: { onClose: () => void; onSubmit: (membership: Omit<Membership, 'id' | 'activeMembers' | 'status'>) => Promise<void> }) {
     const [name, setName] = useState('');
     const [price, setPrice] = useState(500);
     const [duration, setDuration] = useState(30);
     const [benefits, setBenefits] = useState<string[]>([]);
     const [benefitInput, setBenefitInput] = useState('');
+    const [isSubmitting, setIsSubmitting] = useState(false);
 
     const handleAddBenefit = () => {
         if (benefitInput.trim() && !benefits.includes(benefitInput.trim())) {
@@ -62,10 +43,17 @@ function CreateMembershipModal({ onClose, onSubmit }: { onClose: () => void; onS
         setBenefits(benefits.filter(b => b !== benefit));
     };
 
-    const handleSubmit = () => {
+    const handleSubmit = async () => {
         if (!name) return;
-        onSubmit({ name, price, duration, benefits });
-        onClose();
+        setIsSubmitting(true);
+        try {
+            await onSubmit({ name, price, duration, benefits });
+            onClose();
+        } catch (error) {
+            console.error("Error creating membership:", error);
+        } finally {
+            setIsSubmitting(false);
+        }
     };
 
     return (
@@ -159,9 +147,10 @@ function CreateMembershipModal({ onClose, onSubmit }: { onClose: () => void; onS
                     {/* Submit Button */}
                     <Button
                         onClick={handleSubmit}
-                        disabled={!name}
-                        className="w-full bg-green-600 hover:bg-green-700 text-white font-medium py-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                        disabled={!name || isSubmitting}
+                        className="w-full bg-green-600 hover:bg-green-700 text-white font-medium py-2.5 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                     >
+                        {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
                         Crear Plan
                     </Button>
                 </div>
@@ -210,7 +199,7 @@ function MembershipCard({ membership, onEdit, onDelete }: { membership: Membersh
                 <div className="flex items-center justify-between pt-4 border-t border-neutral-800">
                     <div className="flex items-center gap-2 text-sm text-gray-400">
                         <Users className="w-4 h-4" />
-                        {membership.activeMembers} miembros activos
+                        {membership.activeMembers || 0} miembros activos
                     </div>
                     <div className="relative">
                         <button
@@ -248,24 +237,97 @@ function MembershipCard({ membership, onEdit, onDelete }: { membership: Membersh
 }
 
 export function MembershipsPage() {
-    const [memberships, setMemberships] = useState<Membership[]>(sampleMemberships);
+    const [memberships, setMemberships] = useState<Membership[]>([]);
     const [showCreateModal, setShowCreateModal] = useState(false);
+    const [loading, setLoading] = useState(true);
 
-    const handleAddMembership = (data: Omit<Membership, 'id' | 'activeMembers' | 'status'>) => {
-        const newMembership: Membership = {
-            id: Date.now().toString(),
-            ...data,
-            activeMembers: 0,
-            status: 'active'
-        };
-        setMemberships(prev => [...prev, newMembership]);
-    };
+    // Fetch memberships from Firestore
+    useEffect(() => {
+        const unsubscribe = onSnapshot(collection(db, 'memberships'), (snapshot) => {
+            const fetchedMemberships: Membership[] = snapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data()
+            } as Membership));
+            setMemberships(fetchedMemberships);
+            setLoading(false);
+        }, (error) => {
+            console.error("Error fetching memberships:", error);
+            setLoading(false);
+        });
 
-    const handleDeleteMembership = (id: string) => {
-        if (confirm('¿Estás seguro de eliminar esta membresía?')) {
-            setMemberships(prev => prev.filter(m => m.id !== id));
+        return () => unsubscribe();
+    }, []);
+
+    // NEW: Fetch active member counts
+    const [memberCounts, setMemberCounts] = useState<Record<string, number>>({});
+
+    useEffect(() => {
+        // Query only active members
+        const q = query(collection(db, 'members'), where('status', '==', 'active'));
+
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            const counts: Record<string, number> = {};
+
+            snapshot.docs.forEach(doc => {
+                const data = doc.data();
+                const planName = data.plan; // This corresponds to membership.name
+
+                // Debug log
+                // console.log('Member found:', { id: doc.id, plan: planName });
+
+                if (planName) {
+                    // Count exact match
+                    counts[planName] = (counts[planName] || 0) + 1;
+
+                    // Count normalized match (uppercase, trimmed)
+                    const normalized = planName.trim().toUpperCase();
+                    if (normalized !== planName) {
+                        counts[normalized] = (counts[normalized] || 0) + 1;
+                    }
+                }
+            });
+
+            console.log('Member Counts:', counts);
+            setMemberCounts(counts);
+        }, (error) => {
+            console.error("Error fetching member counts:", error);
+        });
+
+        return () => unsubscribe();
+    }, []);
+
+    const handleAddMembership = async (data: Omit<Membership, 'id' | 'activeMembers' | 'status'>) => {
+        try {
+            await addDoc(collection(db, 'memberships'), {
+                ...data,
+                // Ensure price and duration are numbers
+                price: Number(data.price),
+                duration: Number(data.duration),
+                activeMembers: 0,
+                status: 'active',
+                createdAt: serverTimestamp()
+            });
+        } catch (error) {
+            console.error("Error adding membership:", error);
+            alert("Error al crear la membresía");
+            throw error;
         }
     };
+
+    const handleDeleteMembership = async (id: string) => {
+        if (confirm('¿Estás seguro de eliminar esta membresía?')) {
+            try {
+                await deleteDoc(doc(db, 'memberships', id));
+            } catch (error) {
+                console.error("Error deleting membership:", error);
+                alert("Error al eliminar la membresía");
+            }
+        }
+    };
+
+    if (loading) {
+        return <div className="flex justify-center items-center h-64"><Loader2 className="w-8 h-8 animate-spin text-green-500" /></div>;
+    }
 
     return (
         <div className="space-y-8">
@@ -279,16 +341,63 @@ export function MembershipsPage() {
                 </Button>
             </div>
 
-            <div className="grid md:grid-cols-3 gap-6">
-                {memberships.map((membership) => (
-                    <MembershipCard
-                        key={membership.id}
-                        membership={membership}
-                        onEdit={() => console.log('Edit:', membership.id)}
-                        onDelete={() => handleDeleteMembership(membership.id)}
-                    />
-                ))}
-            </div>
+            {memberships.length === 0 ? (
+                <div className="text-center py-12 bg-neutral-900/50 rounded-xl border border-neutral-800">
+                    <h3 className="text-xl font-medium text-white mb-2">No hay membresías creadas</h3>
+                    <p className="text-gray-400 mb-6">Crea tu primer plan para comenzar a recibir miembros.</p>
+                    <Button onClick={() => setShowCreateModal(true)} variant="outline" className="border-green-600 text-green-500 hover:bg-green-600 hover:text-white">
+                        Crear Primer Plan
+                    </Button>
+                </div>
+            ) : (
+                <div className="grid md:grid-cols-3 gap-6">
+                    {memberships.map((membership) => (
+                        <MembershipCard
+                            key={membership.id}
+                            membership={{
+                                ...membership,
+                                // Try exact match > normalized > fuzzy match
+                                activeMembers: (() => {
+                                    const name = membership.name;
+                                    const normalized = name.trim().toUpperCase();
+
+                                    // 1. Exact
+                                    if (memberCounts[name]) return memberCounts[name];
+
+                                    // 2. Normalized
+                                    if (memberCounts[normalized]) return memberCounts[normalized];
+
+                                    // 3. "Plan X" vs "X" (e.g., membership is "TRIMESTRAL", member is "Plan Trimestral")
+                                    // counts key might be "TRIMESTRAL" derived from "Plan Trimestral"
+
+                                    // 4. Reverse: membership "TRIMENSUAL" vs member "Plan Trimestral" -> NO MATCH
+                                    // We need to handle "Trimensual" vs "Trimestral" alias if needed, STRICTLY speaking users might use different words.
+
+                                    // Let's try to find if any key in counts "contains" the membership name or vice versa
+                                    const keys = Object.keys(memberCounts);
+                                    for (const key of keys) {
+                                        if (key.includes(normalized) || normalized.includes(key)) {
+                                            // Make sure it's not a false positive (e.g. "Plan" matches all)
+                                            if (key.length > 4 && normalized.length > 4) {
+                                                return memberCounts[key];
+                                            }
+                                        }
+
+                                        // Specific manual mappings based on common confusion
+                                        if (normalized === 'TRIMENSUAL' && key.includes('TRIMESTRAL')) return memberCounts[key];
+                                        if (normalized === 'BIMENSUAL' && key.includes('BIMESTRAL')) return memberCounts[key];
+                                        if (normalized === 'MENSUAL' && key.includes('MENSUAL')) return memberCounts[key];
+                                    }
+
+                                    return 0;
+                                })()
+                            }}
+                            onEdit={() => console.log('Edit:', membership.id)}
+                            onDelete={() => handleDeleteMembership(membership.id)}
+                        />
+                    ))}
+                </div>
+            )}
 
             {/* Create Membership Modal */}
             {showCreateModal && (

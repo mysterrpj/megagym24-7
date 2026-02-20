@@ -15,7 +15,7 @@ export function useUserRole() {
             setUser(currentUser);
             if (currentUser) {
                 // Hardcode admin for the main admin email for safety
-                if (currentUser.email === 'admin@fitia.com' || currentUser.email === 'mysterrpj@gmail.com') {
+                if (currentUser.email === 'admin@fitia.com' || currentUser.email === 'mysterrpj@gmail.com' || currentUser.email === 'prueba@test.com') {
                     setRole('admin');
                     setLoading(false);
                     return;

@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run build:*)",
+      "Bash(firebase deploy:*)",
+      "Bash(curl:*)",
+      "Bash(firebase functions:log:*)",
+      "Bash(npm --prefix functions run build)",
+      "Bash(git push)",
+      "Bash(npm install)",
+      "Bash(firebase functions:config:get:*)",
+      "Bash(npm run deploy:*)",
+      "Bash(robocopy:*)",
+      "Bash(powershell -Command:*)",
+      "Bash(xcopy /E /I /Y \"c:\\\\Users\\\\Lenovo\\\\PROYECTOS CLAUDE CODE\\\\24-7chatmegagym\\\\src\" \"src\")",
+      "Bash(xcopy:*)"
+    ]
+  }
+}
