@@ -1,125 +1,121 @@
 
 // Uses node `canvas` to draw the voucher programmatically — zero browser dependency.
-// No top-level imports
+// No top-level imports — all lazy-loaded inside the function.
 
 export async function generateVoucherImage(data: any): Promise<string> {
     const admin = require('firebase-admin');
     const { createCanvas } = require('canvas');
 
-    // Ticket dimensions (like a thermal printer ticket)
     const W = 480;
     const PADDING = 30;
-    const LINE_H = 28;
-
-    // --- Calculate height dynamically ---
-    const numRows = 7; // Client, Date, Time, OrderId, Plan, Method, Amount
-    const H = 80 + 70 + numRows * LINE_H + 80 + 80; // header + title + rows + footer + barcode
+    const LINE_H = 30;
+    const numRows = 7;
+    const H = 90 + 70 + numRows * LINE_H + 100 + 60;
 
     const canvas = createCanvas(W, H);
     const ctx = canvas.getContext('2d');
 
-    // --- Background ---
+    // Fondo blanco
     ctx.fillStyle = '#FFFFFF';
     ctx.fillRect(0, 0, W, H);
 
-    // --- Header / Logo ---
-    ctx.fillStyle = '#000000';
+    // Header negro
+    ctx.fillStyle = '#111111';
+    ctx.fillRect(0, 0, W, 90);
+
+    ctx.fillStyle = '#FFFFFF';
     ctx.font = 'bold 36px Arial';
     ctx.textAlign = 'center';
-    ctx.fillText('MEGAGYM', W / 2, 60);
+    ctx.fillText('MEGAGYM', W / 2, 48);
 
-    ctx.font = '16px Arial';
-    ctx.fillText('La casa del dolor 💪', W / 2, 85);
-    ctx.fillText('RUC: 20601234567 | Montenegro, SJL', W / 2, 105);
-
-    drawDashedLine(ctx, PADDING, 125, W - PADDING, 125);
-
-    // --- Title ---
-    ctx.font = 'bold 24px Arial';
-    ctx.fillText('COMPROBANTE DE PAGO', W / 2, 160);
     ctx.font = '14px Arial';
-    ctx.fillText('(Copia Control)', W / 2, 180);
+    ctx.fillStyle = '#CCCCCC';
+    ctx.fillText('COMPROBANTE DE PAGO', W / 2, 72);
 
-    // --- Content Rows ---
+    // Línea punteada
+    drawDashedLine(ctx, PADDING, 105, W - PADDING, 105);
+
+    // Título
+    ctx.fillStyle = '#111111';
+    ctx.font = 'bold 20px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('Recibo de Membresía', W / 2, 140);
+
+    // Filas de datos
     ctx.textAlign = 'left';
-    ctx.font = '18px Arial';
-    let y = 220;
+    let y = 180;
 
-    const rows = [
-        ['CLIENTE:', (data.customerName || 'Cliente').toUpperCase()],
-        ['FECHA:', data.date],
-        ['HORA:', data.time],
-        ['N° ORDEN:', (data.orderId || 'N/A').split('_').pop()?.toUpperCase()],
-        ['PLAN:', data.planName],
-        ['METODO:', data.paymentMethod || 'CULQI'],
-        ['MONTO:', `S/ ${data.amount}`]
+    const rows: [string, string][] = [
+        ['Cliente:', (data.customerName || 'Cliente').toUpperCase()],
+        ['Fecha:', data.date],
+        ['Hora:', data.time],
+        ['N° Orden:', (data.orderId || 'N/A').toString().slice(-10).toUpperCase()],
+        ['Plan:', data.planName],
+        ['Método:', data.paymentMethod || 'CULQI'],
+        ['Monto:', `S/ ${data.amount}`]
     ];
 
     rows.forEach(([label, value]) => {
-        ctx.fillStyle = '#666666';
+        ctx.font = '16px Arial';
+        ctx.fillStyle = '#888888';
         ctx.fillText(label, PADDING, y);
-        ctx.fillStyle = '#000000';
-        ctx.font = 'bold 18px Arial';
-        ctx.fillText(value, PADDING + 110, y);
-        ctx.font = '18px Arial';
+
+        ctx.font = 'bold 16px Arial';
+        ctx.fillStyle = '#111111';
+        ctx.fillText(value, PADDING + 100, y);
+
         y += LINE_H;
     });
 
-    y += 20;
-    drawDashedLine(ctx, PADDING, y, W - PADDING, y);
+    // Línea punteada
+    drawDashedLine(ctx, PADDING, y + 10, W - PADDING, y + 10);
 
-    // --- Total / Footer ---
-    y += 40;
+    // Total
+    y += 45;
     ctx.textAlign = 'center';
-    ctx.font = 'bold 32px Arial';
+    ctx.font = 'bold 28px Arial';
+    ctx.fillStyle = '#111111';
     ctx.fillText(`TOTAL: S/ ${data.amount}`, W / 2, y);
 
-    y += 50;
-    ctx.font = '16px Arial';
-    ctx.fillStyle = '#444444';
-    ctx.fillText('¡Gracias por entrenar con nosotros!', W / 2, y);
+    // Mensaje final
+    y += 40;
+    ctx.font = '15px Arial';
+    ctx.fillStyle = '#555555';
+    ctx.fillText('¡Gracias por entrenar en MegaGym!', W / 2, y);
 
-    // --- QR / Barcode Simulation ---
-    y += 30;
-    ctx.fillStyle = '#000000';
-    const barW = 2;
-    for (let i = 0; i < 60; i++) {
-        const h = 40 + Math.random() * 10;
-        if (Math.random() > 0.3) {
-            ctx.fillRect(PADDING + 40 + i * (barW + 4), y, barW, h);
-        }
-    }
+    // Buffer JPEG
+    const buffer = canvas.toBuffer('image/jpeg', { quality: 0.92 });
 
-    // --- Convert to Buffer ---
-    const buffer = canvas.toBuffer('image/jpeg');
-
-    // --- Upload to Firebase Storage ---
+    // Subir a Firebase Storage con un download token único
     if (!admin.apps.length) admin.initializeApp();
-    const storage = admin.storage();
+    const bucket = admin.storage().bucket();
 
-    // Use default bucket from Firebase runtime config (auto-detected via FIREBASE_CONFIG env var)
-    const bucket = storage.bucket();
-    console.log(`Using default bucket: ${bucket.name}`);
-
-    const fileName = `vouchers/voucher_${Date.now()}_${Math.floor(Math.random() * 1000)}.jpg`;
+    const fileName = `vouchers/voucher_${Date.now()}.jpg`;
     const file = bucket.file(fileName);
 
-    console.log(`Uploading to Storage: ${fileName}`);
+    // Token único que permite acceso público sin cambiar permisos del bucket
+    const crypto = require('crypto');
+    const downloadToken = crypto.randomUUID();
+
     await file.save(buffer, {
-        metadata: { contentType: 'image/jpeg' },
+        metadata: {
+            contentType: 'image/jpeg',
+            metadata: {
+                firebaseStorageDownloadTokens: downloadToken
+            }
+        },
         resumable: false
     });
 
-    try { await file.makePublic(); } catch (_) { /* ignore ACL errors on uniform-access buckets */ }
-
-    const publicUrl = `https://storage.googleapis.com/${bucket.name}/${encodeURIComponent(fileName)}`;
-    console.log('Voucher generated and uploaded:', publicUrl);
-    return publicUrl;
+    // URL de Firebase Storage con token — accesible públicamente por Twilio
+    const downloadUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(fileName)}?alt=media&token=${downloadToken}`;
+    console.log('Voucher listo:', downloadUrl);
+    return downloadUrl;
 }
 
 function drawDashedLine(ctx: any, x1: number, y1: number, x2: number, y2: number) {
     ctx.setLineDash([6, 4]);
-    ctx.strokeStyle = '#AAAAAA';
+    ctx.strokeStyle = '#CCCCCC';
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(x1, y1);

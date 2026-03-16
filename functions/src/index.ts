@@ -82,27 +82,24 @@ export const culqiWebhook = functions
                             })
                         });
 
-                        const memberData = membersSnap.docs[0].data();
-                        const voucher = [
-                            `━━━━━━━━━━━━━━━━━━━━━`,
-                            `🏋️ *MEGAGYM* 🏋️`,
-                            `   COMPROBANTE DE PAGO`,
-                            `━━━━━━━━━━━━━━━━━━━━━`,
-                            `👤 Cliente: ${(memberData.name || 'Cliente').toUpperCase()}`,
-                            `📋 Plan: ${planName || 'Plan 1 Mes'}`,
-                            `💳 Método: Culqi`,
-                            `💰 Monto: S/ ${(order.amount / 100).toFixed(2)}`,
-                            `📅 Vigencia hasta: ${endDate.toISOString().split('T')[0]}`,
-                            `🔖 Orden: ${order.id.toString().slice(-10).toUpperCase()}`,
-                            `━━━━━━━━━━━━━━━━━━━━━`,
-                            `¡Gracias por entrenar con nosotros! 💪`
-                        ].join('\n');
+                        // Generar voucher como imagen
+                        const { generateVoucherImage } = require('./tools/voucherGenerator');
+                        const imageUrl = await generateVoucherImage({
+                            customerName: membersSnap.docs[0].data().name || 'Cliente',
+                            date: today.toLocaleDateString('es-PE'),
+                            time: today.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' }),
+                            orderId: order.id,
+                            planName: planName || 'Plan 1 Mes',
+                            amount: (order.amount / 100).toFixed(2),
+                            paymentMethod: 'Culqi'
+                        });
 
                         const twilioClientObj = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
                         await twilioClientObj.messages.create({
                             from: 'whatsapp:+51907935299',
                             to: `whatsapp:${phone}`,
-                            body: voucher
+                            body: '¡Pago confirmado! 💪 Aquí tu comprobante de MegaGym:',
+                            mediaUrl: [imageUrl]
                         });
                     }
                 }
@@ -123,4 +120,29 @@ export const generateCulqiLink = functions.https.onRequest(async (req, res) => {
     } catch (e: any) {
         res.status(500).json({ error: e.message });
     }
+});
+
+// Sirve imágenes de vouchers desde Storage sin necesitar permisos públicos
+export const serveVoucher = functions.https.onRequest(async (req, res) => {
+    const fileName = req.query.file as string;
+    if (!fileName || !fileName.startsWith('vouchers/')) {
+        res.status(400).send('Bad request');
+        return;
+    }
+
+    const admin = require('firebase-admin');
+    if (!admin.apps.length) admin.initializeApp();
+
+    const bucket = admin.storage().bucket();
+    const file = bucket.file(fileName);
+
+    const [exists] = await file.exists();
+    if (!exists) {
+        res.status(404).send('Not found');
+        return;
+    }
+
+    res.setHeader('Content-Type', 'image/jpeg');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    file.createReadStream().pipe(res);
 });
