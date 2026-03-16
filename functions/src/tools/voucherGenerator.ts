@@ -88,7 +88,7 @@ export async function generateVoucherImage(data: any): Promise<string> {
 
     // Subir a Firebase Storage con un download token único
     if (!admin.apps.length) admin.initializeApp();
-    const bucket = admin.storage().bucket();
+    const bucket = admin.storage().bucket('fit-ia-megagym.appspot.com');
 
     const fileName = `vouchers/voucher_${Date.now()}.jpg`;
     const file = bucket.file(fileName);

@@ -97,27 +97,22 @@ export async function executeTool(name: string, args: any) {
                 const lastPayment = member.payments?.[member.payments.length - 1];
                 if (!lastPayment && !member.culqiOrderId) return { error: "No se encontró un pago registrado para este miembro." };
 
-                const { generateVoucherImage } = require('../tools/voucherGenerator');
-                const today = new Date();
-                const imageUrl = await generateVoucherImage({
-                    customerName: member.name || 'Cliente',
-                    date: today.toLocaleDateString('es-PE'),
-                    time: today.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' }),
-                    orderId: member.culqiOrderId || lastPayment?.orderId || 'N/A',
-                    planName: member.plan || 'Plan',
-                    amount: (lastPayment?.amount ?? 0).toFixed(2),
-                    paymentMethod: 'Culqi'
-                });
+                const voucher = [
+                    `━━━━━━━━━━━━━━━━━━━━━`,
+                    `🏋️ *MEGAGYM* 🏋️`,
+                    `   COMPROBANTE DE PAGO`,
+                    `━━━━━━━━━━━━━━━━━━━━━`,
+                    `👤 Cliente: ${(member.name || 'Cliente').toUpperCase()}`,
+                    `📋 Plan: ${member.plan || 'N/A'}`,
+                    `💳 Método: Culqi`,
+                    `💰 Monto: S/ ${(lastPayment?.amount ?? 0).toFixed(2)}`,
+                    `📅 Vigencia hasta: ${member.endDate || 'N/A'}`,
+                    `🔖 Orden: ${(member.culqiOrderId || lastPayment?.orderId || 'N/A').toString().slice(-10).toUpperCase()}`,
+                    `━━━━━━━━━━━━━━━━━━━━━`,
+                    `¡Gracias por entrenar con nosotros! 💪`
+                ].join('\n');
 
-                const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-                await twilioClient.messages.create({
-                    from: 'whatsapp:+51907935299',
-                    to: `whatsapp:${args.phone}`,
-                    body: '📄 Tu comprobante de pago MegaGym:',
-                    mediaUrl: [imageUrl]
-                });
-
-                return { success: true, message: "Voucher enviado como imagen." };
+                return { success: true, voucher };
             } catch (e: any) {
                 return { error: e.message };
             }
