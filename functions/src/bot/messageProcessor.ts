@@ -110,24 +110,33 @@ export async function executeTool(name: string, args: any) {
                 const member = snap.docs[0].data();
 
                 const lastPayment = member.payments?.[member.payments.length - 1];
-                if (!lastPayment && !member.culqiOrderId) return { error: "No se encontró un pago registrado para este miembro." };
 
-                const voucher = [
+                // Construir voucher con los datos disponibles (pago directo o membresía manual)
+                const lines = [
                     `━━━━━━━━━━━━━━━━━━━━━`,
                     `🏋️ *MEGAGYM* 🏋️`,
-                    `   COMPROBANTE DE PAGO`,
+                    `   COMPROBANTE DE MEMBRESÍA`,
                     `━━━━━━━━━━━━━━━━━━━━━`,
                     `👤 Cliente: ${(member.name || 'Cliente').toUpperCase()}`,
                     `📋 Plan: ${member.plan || 'N/A'}`,
-                    `💳 Método: Culqi`,
-                    `💰 Monto: S/ ${(lastPayment?.amount ?? 0).toFixed(2)}`,
+                    `📅 Inicio: ${member.startDate || 'N/A'}`,
                     `📅 Vigencia hasta: ${member.endDate || 'N/A'}`,
-                    `🔖 Orden: ${(member.culqiOrderId || lastPayment?.orderId || 'N/A').toString().slice(-10).toUpperCase()}`,
-                    `━━━━━━━━━━━━━━━━━━━━━`,
-                    `¡Gracias por entrenar con nosotros! 💪`
-                ].join('\n');
+                    `✅ Estado: ${member.status === 'active' ? 'ACTIVO' : (member.status || 'N/A').toUpperCase()}`,
+                ];
 
-                return { success: true, voucher };
+                if (lastPayment?.amount) {
+                    lines.push(`💰 Monto: S/ ${lastPayment.amount.toFixed(2)}`);
+                    lines.push(`💳 Método: Culqi`);
+                }
+                if (member.culqiOrderId || lastPayment?.orderId) {
+                    const orderId = (member.culqiOrderId || lastPayment?.orderId).toString().slice(-10).toUpperCase();
+                    lines.push(`🔖 Orden: ${orderId}`);
+                }
+
+                lines.push(`━━━━━━━━━━━━━━━━━━━━━`);
+                lines.push(`¡Gracias por entrenar con nosotros! 💪`);
+
+                return { success: true, voucher: lines.join('\n') };
             } catch (e: any) {
                 return { error: e.message };
             }
