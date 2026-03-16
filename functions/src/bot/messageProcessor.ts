@@ -1,5 +1,20 @@
 
 
+// Busca un miembro probando múltiples formatos de teléfono
+async function findMember(db: any, phone: string) {
+    const formats = new Set([
+        phone,
+        phone.startsWith('+') ? phone.slice(1) : '+' + phone,
+        phone.replace(/^\+?51/, ''),
+        '+51' + phone.replace(/^\+?51/, '')
+    ]);
+    for (const fmt of formats) {
+        const snap = await db.collection('members').where('phone', '==', fmt).limit(1).get();
+        if (!snap.empty) return snap;
+    }
+    return null;
+}
+
 export async function executeTool(name: string, args: any) {
     const adminInner = require('firebase-admin');
     if (!adminInner.apps.length) adminInner.initializeApp();
@@ -15,15 +30,15 @@ export async function executeTool(name: string, args: any) {
             return classesSnap.docs.map((doc: any) => ({ id: doc.id, ...doc.data() }));
 
         case 'check_member_status':
-            const membersSnap = await dbInner.collection('members').where('phone', '==', args.phone).get();
-            if (membersSnap.empty) return { status: 'not_found' };
+            const membersSnap = await findMember(dbInner, args.phone);
+            if (!membersSnap) return { status: 'not_found' };
             const member = membersSnap.docs[0].data();
             return member;
 
         case 'book_class':
             try {
-                const memSnap = await dbInner.collection('members').where('phone', '==', args.phone).get();
-                if (memSnap.empty) return { error: "Member not found" };
+                const memSnap = await findMember(dbInner, args.phone);
+                if (!memSnap) return { error: "Member not found" };
                 const memberId = memSnap.docs[0].id;
 
                 await dbInner.collection('bookings').add({
@@ -64,9 +79,9 @@ export async function executeTool(name: string, args: any) {
         case 'register_user':
             try {
                 const membersRef = dbInner.collection('members');
-                const q = await membersRef.where('phone', '==', args.phone).limit(1).get();
+                const q = await findMember(dbInner, args.phone);
 
-                if (!q.empty) {
+                if (q && !q.empty) {
                     await q.docs[0].ref.update({
                         name: args.name,
                         dni: args.dni || '',
@@ -90,8 +105,8 @@ export async function executeTool(name: string, args: any) {
 
         case 'send_payment_voucher':
             try {
-                const snap = await dbInner.collection('members').where('phone', '==', args.phone).limit(1).get();
-                if (snap.empty) return { error: "No se encontró al miembro con ese número." };
+                const snap = await findMember(dbInner, args.phone);
+                if (!snap) return { error: "No se encontró al miembro con ese número." };
                 const member = snap.docs[0].data();
 
                 const lastPayment = member.payments?.[member.payments.length - 1];
@@ -217,12 +232,12 @@ export async function processMessage(db: any, phone: string, messageText: string
         }
     ];
 
-    const memberDoc = await db.collection('members').where('phone', '==', phone).limit(1).get();
+    const memberDoc = await findMember(db, phone);
     let customerContext = "Prospecto o cliente no registrado.";
 
-    if (!memberDoc.empty) {
+    if (memberDoc && !memberDoc.empty) {
         const data = memberDoc.docs[0].data();
-        customerContext = `CLIENTE ACTIVO: ${data.name}. Plan: ${data.plan}. Vence: ${data.endDate}.`;
+        customerContext = `CLIENTE REGISTRADO: ${data.name}. Plan: ${data.plan || 'sin plan'}. Estado: ${data.status || 'prospecto'}. Vence: ${data.endDate || 'N/A'}.`;
     }
 
     const historySnapshot = await db.collection('messages')
