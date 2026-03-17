@@ -174,6 +174,76 @@ export async function executeTool(name: string, args: any) {
                 return { error: e.message };
             }
 
+        case 'update_member_profile':
+            try {
+                const snap = await findMember(dbInner, args.phone);
+                if (!snap) return { error: 'Miembro no encontrado.' };
+                const ref = snap.docs[0].ref;
+                const current = snap.docs[0].data().trainingProfile || {};
+                await ref.update({
+                    trainingProfile: { ...current, ...args.fields },
+                    profileStep: (snap.docs[0].data().profileStep || 0) + 1
+                });
+                return { success: true };
+            } catch (e: any) {
+                return { error: e.message };
+            }
+
+        case 'get_payment_history':
+            try {
+                const snap = await findMember(dbInner, args.phone);
+                if (!snap) return { found: false, message: 'No se encontró al miembro.' };
+                const member = snap.docs[0].data();
+                const payments = member.payments || [];
+                if (payments.length === 0) return { found: false, message: 'No hay pagos registrados.' };
+                const total = payments.reduce((sum: number, p: any) => sum + (Number(p.amount) || 0), 0);
+                const list = payments.map((p: any, i: number) => {
+                    const date = p.date || p.createdAt || 'N/A';
+                    const amount = Number(p.amount) || 0;
+                    const method = p.method || 'N/A';
+                    return `${i + 1}. ${date} — S/ ${amount.toFixed(2)} (${method})`;
+                });
+                return { found: true, payments: list, total: total.toFixed(2), count: payments.length };
+            } catch (e: any) {
+                return { error: e.message };
+            }
+
+        case 'get_student_routine':
+            try {
+                const routineSnap = await dbInner.collection('studentRoutineAssignments')
+                    .where('studentPhone', '==', args.phone)
+                    .where('status', '==', 'active')
+                    .limit(1)
+                    .get();
+
+                if (routineSnap.empty) {
+                    // Probar formatos alternativos de teléfono
+                    const formats = new Set([
+                        args.phone,
+                        args.phone.startsWith('+') ? args.phone.slice(1) : '+' + args.phone,
+                        args.phone.replace(/^\+?51/, ''),
+                        '+51' + args.phone.replace(/^\+?51/, '')
+                    ]);
+                    let found: any = null;
+                    for (const fmt of formats) {
+                        const s = await dbInner.collection('studentRoutineAssignments')
+                            .where('studentPhone', '==', fmt)
+                            .where('status', '==', 'active')
+                            .limit(1)
+                            .get();
+                        if (!s.empty) { found = s; break; }
+                    }
+                    if (!found) return { found: false, message: 'No tienes una rutina asignada aún.' };
+                    const r = found.docs[0].data();
+                    return { found: true, title: r.routineTitle, url: r.routineUrl };
+                }
+
+                const r = routineSnap.docs[0].data();
+                return { found: true, title: r.routineTitle, url: r.routineUrl };
+            } catch (e: any) {
+                return { error: e.message };
+            }
+
         default:
             return { error: "Tool not found" };
     }
@@ -261,6 +331,20 @@ export async function processMessage(db: any, phone: string, messageText: string
         {
             type: "function",
             function: {
+                name: "get_student_routine",
+                description: "Obtener la rutina de entrenamiento asignada al cliente. Úsalo cuando el cliente pida su rutina, ejercicios, o plan de entrenamiento.",
+                parameters: {
+                    type: "object",
+                    properties: {
+                        phone: { type: "string", description: "Teléfono del cliente" }
+                    },
+                    required: ["phone"]
+                }
+            }
+        },
+        {
+            type: "function",
+            function: {
                 name: "send_payment_voucher",
                 description: "Generar y enviar el voucher en formato de IMAGEN (Ticket). Usa esto cuando el cliente lo pida.",
                 parameters: {
@@ -271,15 +355,83 @@ export async function processMessage(db: any, phone: string, messageText: string
                     required: ["phone"]
                 }
             }
+        },
+        {
+            type: "function",
+            function: {
+                name: "update_member_profile",
+                description: "Guardar en el perfil del cliente la información que él mismo te proporcionó (objetivo, nivel, días disponibles, limitaciones). Úsalo cuando el cliente responda preguntas sobre su entrenamiento.",
+                parameters: {
+                    type: "object",
+                    properties: {
+                        phone: { type: "string" },
+                        fields: {
+                            type: "object",
+                            description: "Campos a guardar. Puede incluir: objetivo, nivel, diasSemana, limitaciones",
+                            properties: {
+                                objetivo: { type: "string" },
+                                nivel: { type: "string" },
+                                diasSemana: { type: "number" },
+                                limitaciones: { type: "string" }
+                            }
+                        }
+                    },
+                    required: ["phone", "fields"]
+                }
+            }
+        },
+        {
+            type: "function",
+            function: {
+                name: "get_payment_history",
+                description: "Obtener el historial de pagos del cliente: fechas, montos y métodos. Úsalo cuando el cliente pregunte cuánto ha pagado, cuándo fue su último pago, o pida su historial de pagos.",
+                parameters: {
+                    type: "object",
+                    properties: {
+                        phone: { type: "string", description: "Teléfono del cliente" }
+                    },
+                    required: ["phone"]
+                }
+            }
         }
     ];
 
     const memberDoc = await findMember(db, phone);
     let customerContext = "Prospecto o cliente no registrado.";
+    let clientFirstName = '';
+
+    let memberStatus = 'unknown';
+    let daysUntilExpiry = null;
+    let profileQuestion: string | null = null;
 
     if (memberDoc && !memberDoc.empty) {
         const data = memberDoc.docs[0].data();
-        customerContext = `CLIENTE REGISTRADO: Nombre: ${data.name || 'N/A'}. DNI: ${data.dni || 'N/A'}. Email: ${data.email || 'N/A'}. Plan: ${data.plan || 'sin plan'}. Estado: ${data.status || 'prospecto'}. Vence: ${data.endDate || 'N/A'}.`;
+        clientFirstName = (data.name || '').split(' ')[0];
+        memberStatus = data.status || 'prospect';
+
+        // Calcular días hasta vencimiento
+        if (data.endDate) {
+            const end = new Date(data.endDate);
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            daysUntilExpiry = Math.ceil((end.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+        }
+
+        // Perfil de entrenamiento
+        const profile = data.trainingProfile || {};
+        const profileStep = data.profileStep || 0;
+        const profileStr = profile.objetivo
+            ? `Objetivo: ${profile.objetivo}. Nivel: ${profile.nivel || 'N/A'}. Días/semana: ${profile.diasSemana || 'N/A'}. Limitaciones: ${profile.limitaciones || 'ninguna'}. Notas trainer: ${profile.notasTrainer || 'N/A'}.`
+            : 'Sin perfil de entrenamiento aún.';
+
+        // Determinar qué pregunta de perfil hacer (solo miembros activos)
+        if (memberStatus === 'active' && profileStep < 3) {
+            if (!profile.objetivo) profileQuestion = `Por cierto ${clientFirstName}, ¿cuál es tu objetivo principal en el gym? (bajar de peso, ganar músculo, tonificar...) 💪`;
+            else if (!profile.nivel) profileQuestion = `¿Te consideras principiante, intermedio o avanzado en el entrenamiento?`;
+            else if (!profile.diasSemana) profileQuestion = `¿Cuántos días a la semana puedes venir a entrenar?`;
+        }
+
+        customerContext = `CLIENTE REGISTRADO: Nombre: ${data.name || 'N/A'}. DNI: ${data.dni || 'N/A'}. Email: ${data.email || 'N/A'}. Plan: ${data.plan || 'sin plan'}. Estado: ${memberStatus}. Vence: ${data.endDate || 'N/A'}. Días hasta vencimiento: ${daysUntilExpiry !== null ? daysUntilExpiry : 'N/A'}. Perfil: ${profileStr}`;
     }
 
     const historySnapshot = await db.collection('messages')
@@ -295,9 +447,27 @@ export async function processMessage(db: any, phone: string, messageText: string
 
     messages.push({ role: 'user', content: messageText });
 
-    const systemPrompt = `Eres Sofía de MegaGym. Teléfono del cliente: ${phone}. Contexto: ${customerContext}
-    REGLA CRÍTICA: Si el cliente está REGISTRADO, YA TIENES su nombre, DNI y email en el contexto anterior. NO los pidas al usuario. Úsalos directamente para generar el link de pago.
-    REGLA: Si un tool devuelve éxito, CONFÍRMALO y no digas que hay fallos.`;
+    const greetingName = clientFirstName ? ` ${clientFirstName}` : '';
+    const profileQuestionInstruction = profileQuestion
+        ? `\n    PREGUNTA DE PERFIL PENDIENTE: Al final de tu respuesta (después de responder lo que el cliente pidió), añade esta pregunta de forma natural: "${profileQuestion}". Si el cliente responde, guarda con update_member_profile.`
+        : '';
+
+    const systemPrompt = `Eres Sofía, asistente personal y trainer virtual de MegaGym. Eres cercana, motivadora y hablas como amiga — no como robot. Usas el nombre del cliente siempre que puedas.
+    Teléfono del cliente: ${phone}. Contexto: ${customerContext}
+
+    PERSONALIDAD: Eres el trainer personal del cliente. Si tienes su perfil (objetivo, nivel), úsalo para dar consejos específicos. Si pregunta sobre ejercicios, nutrición o entrenamiento, responde como un trainer real con conocimiento — no solo como recepcionista.
+
+    REGLAS DE SALUDO (aplica cuando el cliente diga Hola, Buenos días, etc.):
+    - Si estado es "active" y días hasta vencimiento <= 7: "¡Hola${greetingName}! 😊 Te aviso que tu membresía vence el ${memberDoc && !memberDoc.empty ? memberDoc.docs[0].data().endDate : ''} (en ${daysUntilExpiry} días). ¿Quieres renovar?"
+    - Si estado es "active" y días > 7: "¡Hola${greetingName}! 😊 ¿En qué puedo ayudarte hoy?"
+    - Si estado es "overdue" o días < 0: "¡Hola${greetingName}! Tu membresía venció el ${memberDoc && !memberDoc.empty ? memberDoc.docs[0].data().endDate : ''}. ¿Te ayudo a renovar? 💪"
+    - Si es prospecto o no registrado: saluda normal y ofrece planes (1 mes S/80, 2 meses S/120, 3 meses S/150).
+
+    REGLA CRÍTICA: Si el cliente está REGISTRADO, YA TIENES su nombre, DNI y email en el contexto. NO los pidas. Úsalos directamente para generar el link de pago.
+    REGLA RUTINA: Si el cliente pide su rutina o ejercicios, usa get_student_routine y envíale el link.
+    REGLA HISTORIAL: Si el cliente pregunta sobre sus pagos o historial, usa get_payment_history.
+    REGLA PERFIL: Si el cliente responde preguntas sobre su objetivo, nivel o días disponibles, guarda con update_member_profile inmediatamente.
+    REGLA: Si un tool devuelve éxito, CONFÍRMALO y no digas que hay fallos.${profileQuestionInstruction}`;
 
     const response = await openai.chat.completions.create({
         model: 'gpt-4o',

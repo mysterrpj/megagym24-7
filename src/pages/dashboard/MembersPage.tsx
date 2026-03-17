@@ -26,6 +26,14 @@ interface Member {
     expirationDateObj?: Date;
 }
 
+const TRAINING_TEMPLATES = [
+    { value: '', label: 'Sin perfil' },
+    { value: 'perdida_peso', label: '🔥 Pérdida de peso', objetivo: 'Pérdida de peso', nivel: 'Principiante', diasSemana: 3 },
+    { value: 'ganancia_muscular', label: '💪 Ganancia muscular', objetivo: 'Ganancia muscular', nivel: 'Intermedio', diasSemana: 4 },
+    { value: 'tonificacion', label: '✨ Tonificación', objetivo: 'Tonificación', nivel: 'Principiante', diasSemana: 3 },
+    { value: 'resistencia', label: '🏃 Resistencia', objetivo: 'Resistencia', nivel: 'Avanzado', diasSemana: 5 },
+];
+
 // Stats Card Component
 function StatsCard({ title, value, color }: { title: string; value: number; color: string }) {
     return (
@@ -54,6 +62,15 @@ function MemberModal({
     const [phone, setPhone] = useState(member?.phone || '');
     const [plan, setPlan] = useState(member?.plan || 'Membresía Fit 2026');
     const [status, setStatus] = useState<'active' | 'pending' | 'prospect' | 'overdue'>(member?.status === 'overdue' ? 'overdue' : (member?.status || 'active'));
+
+    // Training profile
+    const [showProfile, setShowProfile] = useState(!!(member as any)?.trainingProfile?.objetivo);
+    const [trainingTemplate, setTrainingTemplate] = useState('');
+    const [objetivo, setObjetivo] = useState((member as any)?.trainingProfile?.objetivo || '');
+    const [nivel, setNivel] = useState((member as any)?.trainingProfile?.nivel || '');
+    const [diasSemana, setDiasSemana] = useState((member as any)?.trainingProfile?.diasSemana?.toString() || '');
+    const [limitaciones, setLimitaciones] = useState((member as any)?.trainingProfile?.limitaciones || '');
+    const [notasTrainer, setNotasTrainer] = useState((member as any)?.trainingProfile?.notasTrainer || '');
 
     // Payment fields
     const [planPrice, setPlanPrice] = useState(member?.planPrice?.toString() || '80');
@@ -87,8 +104,21 @@ function MemberModal({
     // BUT user asked for auto-calc. Let's make it recalculate on plan change).
     // We need to differentiate "initial load" from "user changed plan".
 
-    // Auto-update expiration date based on PLAN and JOIN DATE
+    // Apply training template
     useEffect(() => {
+        if (!trainingTemplate) return;
+        const t = TRAINING_TEMPLATES.find(t => t.value === trainingTemplate);
+        if (t && t.value) {
+            setObjetivo(t.objetivo || '');
+            setNivel(t.nivel || '');
+            setDiasSemana(t.diasSemana?.toString() || '');
+            setShowProfile(true);
+        }
+    }, [trainingTemplate]);
+
+    // Auto-update expiration date based on PLAN and JOIN DATE (solo al crear, no al editar)
+    useEffect(() => {
+        if (member) return; // No recalcular si estamos editando
         if (!joinDate || joinDate.length < 10) return;
         const [y, m, d] = joinDate.split('-').map(Number);
         if (!y || !m || !d) return;
@@ -103,7 +133,7 @@ function MemberModal({
         if (!isNaN(newDate.getTime())) {
             setExpirationDate(newDate.toISOString().split('T')[0]);
         }
-    }, [plan, joinDate]);
+    }, [plan, joinDate, member]);
 
     // Update price based on plan selection
     useEffect(() => {
@@ -132,13 +162,14 @@ function MemberModal({
     const handleSubmit = () => {
         if (!name || !phone) return;
         onSubmit({
-            id: member?.id, // Pass ID if editing
+            id: member?.id,
             name, dni, email, phone, plan, status,
             amountPaid: parseFloat(amountPaid) || 0,
             planPrice: parseFloat(planPrice) || 0,
-            expirationDateStr: expirationDate, // Pass string 'YYYY-MM-DD'
-            joinDateStr: joinDate, // Pass string 'YYYY-MM-DD'
-            debt: debt
+            expirationDateStr: expirationDate,
+            joinDateStr: joinDate,
+            debt: debt,
+            trainingProfile: objetivo ? { objetivo, nivel, diasSemana: parseInt(diasSemana) || 0, limitaciones, notasTrainer } : null
         });
         onClose();
     };
@@ -296,6 +327,94 @@ function MemberModal({
                     {debt > 0 && (
                         <div className="col-span-2 text-center bg-red-500/10 border border-red-500/20 rounded-md py-1">
                             <p className="text-xs text-red-500 font-bold">⚠️ Deuda Pendiente: S/ {debt.toFixed(2)}</p>
+                        </div>
+                    )}
+                </div>
+
+                {/* Training Profile (optional) */}
+                <div className="mt-3">
+                    <button
+                        type="button"
+                        onClick={() => setShowProfile(!showProfile)}
+                        className="flex items-center gap-2 text-sm text-gray-400 hover:text-green-400 transition-colors"
+                    >
+                        <span>{showProfile ? '▼' : '▶'}</span>
+                        <span>Perfil de entrenamiento <span className="text-gray-500">(opcional)</span></span>
+                    </button>
+
+                    {showProfile && (
+                        <div className="mt-3 space-y-3 bg-neutral-800/40 border border-neutral-700/50 rounded-lg p-3">
+                            {/* Template selector */}
+                            <div>
+                                <label className="block text-xs text-gray-400 mb-1">Plantilla rápida</label>
+                                <select
+                                    value={trainingTemplate}
+                                    onChange={(e) => setTrainingTemplate(e.target.value)}
+                                    className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-green-500"
+                                >
+                                    {TRAINING_TEMPLATES.map(t => (
+                                        <option key={t.value} value={t.value}>{t.label}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="block text-xs text-gray-400 mb-1">Objetivo</label>
+                                    <input
+                                        type="text"
+                                        value={objetivo}
+                                        onChange={(e) => setObjetivo(e.target.value)}
+                                        placeholder="Pérdida de peso"
+                                        className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-green-500"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs text-gray-400 mb-1">Nivel</label>
+                                    <select
+                                        value={nivel}
+                                        onChange={(e) => setNivel(e.target.value)}
+                                        className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-green-500"
+                                    >
+                                        <option value="">Seleccionar</option>
+                                        <option>Principiante</option>
+                                        <option>Intermedio</option>
+                                        <option>Avanzado</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="block text-xs text-gray-400 mb-1">Días/semana</label>
+                                    <input
+                                        type="number"
+                                        min="1" max="7"
+                                        value={diasSemana}
+                                        onChange={(e) => setDiasSemana(e.target.value)}
+                                        placeholder="3"
+                                        className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-green-500"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs text-gray-400 mb-1">Limitaciones</label>
+                                    <input
+                                        type="text"
+                                        value={limitaciones}
+                                        onChange={(e) => setLimitaciones(e.target.value)}
+                                        placeholder="Rodilla, lumbar..."
+                                        className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-green-500"
+                                    />
+                                </div>
+                            </div>
+                            <div>
+                                <label className="block text-xs text-gray-400 mb-1">Notas del trainer</label>
+                                <input
+                                    type="text"
+                                    value={notasTrainer}
+                                    onChange={(e) => setNotasTrainer(e.target.value)}
+                                    placeholder="Notas especiales..."
+                                    className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-green-500"
+                                />
+                            </div>
                         </div>
                     )}
                 </div>
@@ -736,7 +855,8 @@ export function MembersPage() {
                     startDate: data.joinDateStr || '',
                     endDate: data.expirationDateStr || '',
                     expirationDate: expirationDateObj,
-                    createdAt: joinDateObj
+                    createdAt: joinDateObj,
+                    ...(data.trainingProfile ? { trainingProfile: data.trainingProfile } : {})
                 });
             } else if (modalMode === 'edit' && data.id) {
                 await updateDoc(doc(db, 'members', data.id), {
@@ -753,7 +873,8 @@ export function MembersPage() {
                     startDate: data.joinDateStr,
                     endDate: data.expirationDateStr,
                     createdAt: joinDateObj,
-                    updatedAt: serverTimestamp()
+                    updatedAt: serverTimestamp(),
+                    ...(data.trainingProfile ? { trainingProfile: data.trainingProfile } : {})
                 });
             }
 
