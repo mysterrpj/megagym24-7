@@ -733,8 +733,10 @@ export function MembersPage() {
                     status: data.status,
                     amountPaid: data.amountPaid,
                     planPrice: data.planPrice,
-                    expirationDate: expirationDateObj, // Save Date
-                    createdAt: joinDateObj // Save User Selected Date
+                    startDate: data.joinDateStr || '',
+                    endDate: data.expirationDateStr || '',
+                    expirationDate: expirationDateObj,
+                    createdAt: joinDateObj
                 });
             } else if (modalMode === 'edit' && data.id) {
                 await updateDoc(doc(db, 'members', data.id), {

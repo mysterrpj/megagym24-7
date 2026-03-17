@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Download, Plus, DollarSign, TrendingUp, TrendingDown, Calendar, Search, MoreVertical, CreditCard, FileText, Banknote, Landmark } from 'lucide-react';
 import { BarChart, Bar, XAxis, Tooltip, ResponsiveContainer, Cell, LabelList } from 'recharts';
-import { collection, query, orderBy, onSnapshot } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, doc, getDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { NewInvoiceDialog } from '@/components/dashboard/NewInvoiceDialog';
 
@@ -40,6 +40,34 @@ export function PaymentsPage() {
     const [loading, setLoading] = useState(true);
 
     const [isNewInvoiceOpen, setIsNewInvoiceOpen] = useState(false);
+    const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+
+    const handleDeletePayment = async (txId: string) => {
+        if (!confirm('¿Eliminar este pago? Esta acción no se puede deshacer.')) return;
+        try {
+            // txId format: "memberId-paymentIndex" for member payments, or plain doc id for manual payments
+            const parts = txId.split('-');
+            const lastPart = parts[parts.length - 1];
+            const isIndex = !isNaN(Number(lastPart));
+
+            if (isIndex) {
+                const memberId = parts.slice(0, -1).join('-');
+                const memberRef = doc(db, 'members', memberId);
+                const memberSnap = await getDoc(memberRef);
+                if (!memberSnap.exists()) return;
+                const payments: any[] = memberSnap.data().payments || [];
+                const idx = Number(lastPart);
+                const newPayments = payments.filter((_: any, i: number) => i !== idx);
+                const newAmountPaid = newPayments.reduce((sum: number, p: any) => sum + (Number(p.amount) || 0), 0);
+                await updateDoc(memberRef, { payments: newPayments, amountPaid: newAmountPaid });
+            } else {
+                await deleteDoc(doc(db, 'payments', txId));
+            }
+            setOpenMenuId(null);
+        } catch (e: any) {
+            alert('Error al eliminar: ' + e.message);
+        }
+    };
 
     useEffect(() => {
         // Fetch members (Automatic Transactions)
@@ -76,47 +104,71 @@ export function PaymentsPage() {
                 if (!monthlyRevenue[displayMonth]) monthlyRevenue[displayMonth] = 0;
             }
 
-            // Process Members (Auto)
-            membersData.forEach((data, index) => {
-                const amountPaid = Number(data.amountPaid) || 0;
-                const debt = Number(data.debt) || 0;
+            // Process Members - one row per individual payment
+            membersData.forEach((data) => {
+                const payments: any[] = Array.isArray(data.payments) ? data.payments : [];
 
-                // Date handling
-                let dateObj = new Date();
-                if (data.activeSince) {
-                    dateObj = new Date(data.activeSince);
-                } else if (data.joinDate && data.joinDate !== 'Reciente') {
-                    // Try to parse if string? formatted date is hard to parse back safely without locale.
-                    // Fallback to createdAt
+                if (payments.length > 0) {
+                    // Show each payment individually
+                    payments.forEach((pago: any, pIndex: number) => {
+                        const amount = Number(pago.amount) || 0;
+                        let dateObj = new Date();
+                        if (pago.date) dateObj = new Date(pago.date);
+
+                        total += amount;
+                        if (dateObj >= thirtyDaysAgo) count30Days++;
+
+                        const monthName = dateObj.toLocaleString('es-ES', { month: 'short' });
+                        const displayMonth = monthName.charAt(0).toUpperCase() + monthName.slice(1);
+                        if (monthlyRevenue.hasOwnProperty(displayMonth)) {
+                            monthlyRevenue[displayMonth] += amount;
+                        }
+
+                        allTransactions.push({
+                            id: `${data.id}-${pIndex}`,
+                            invoice: `PAG-${data.id.substring(0, 4).toUpperCase()}-${pIndex + 1}`,
+                            user: data.name || 'Usuario Desconocido',
+                            plan: data.plan || 'Membresía',
+                            amount,
+                            date: dateObj.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' }),
+                            rawDate: dateObj,
+                            method: pago.method || 'Efectivo',
+                            status: 'Pagado',
+                            type: 'Boleta'
+                        });
+                    });
+                } else {
+                    // Miembro sin array de pagos — usar amountPaid total como antes
+                    const amountPaid = Number(data.amountPaid) || 0;
+                    const debt = Number(data.debt) || 0;
+                    if (amountPaid === 0) return;
+
+                    let dateObj = new Date();
                     if (data.createdAt?.toDate) dateObj = data.createdAt.toDate();
-                } else if (data.createdAt?.toDate) {
-                    dateObj = data.createdAt.toDate();
+
+                    total += amountPaid;
+                    if (debt > 0) pending += debt;
+                    if (dateObj >= thirtyDaysAgo) count30Days++;
+
+                    const monthName = dateObj.toLocaleString('es-ES', { month: 'short' });
+                    const displayMonth = monthName.charAt(0).toUpperCase() + monthName.slice(1);
+                    if (monthlyRevenue.hasOwnProperty(displayMonth)) {
+                        monthlyRevenue[displayMonth] += amountPaid;
+                    }
+
+                    allTransactions.push({
+                        id: data.id,
+                        invoice: `PAG-${data.id.substring(0, 6).toUpperCase()}`,
+                        user: data.name || 'Usuario Desconocido',
+                        plan: data.plan || 'Membresía',
+                        amount: amountPaid,
+                        date: dateObj.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' }),
+                        rawDate: dateObj,
+                        method: 'Efectivo',
+                        status: debt > 0 ? 'Pendiente' : 'Pagado',
+                        type: 'Boleta'
+                    });
                 }
-
-                total += amountPaid;
-                if (debt > 0) pending += debt;
-                if (dateObj >= thirtyDaysAgo) count30Days++;
-
-                // Chart
-                const monthName = dateObj.toLocaleString('es-ES', { month: 'short' });
-                const displayMonth = monthName.charAt(0).toUpperCase() + monthName.slice(1);
-                if (monthlyRevenue.hasOwnProperty(displayMonth)) {
-                    monthlyRevenue[displayMonth] += amountPaid;
-                }
-
-                // Add to transactions list
-                allTransactions.push({
-                    id: data.id,
-                    invoice: `INV-MEM-${String(index + 1).padStart(3, '0')}`, // Prefix to distinguish
-                    user: data.name || 'Usuario Desconocido',
-                    plan: data.plan || 'Membresía',
-                    amount: amountPaid,
-                    date: dateObj.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' }),
-                    rawDate: dateObj,
-                    method: 'Efectivo', // Default for members currently
-                    status: debt > 0 ? 'Pendiente' : 'Pagado',
-                    type: 'Boleta' // Default
-                });
             });
 
             // Process Payments (Manual)
@@ -404,9 +456,25 @@ export function PaymentsPage() {
                                             </span>
                                         </td>
                                         <td className="px-6 py-4 text-right">
-                                            <Button variant="ghost" size="icon" className="h-8 w-8 text-gray-400 hover:text-white">
-                                                <MoreVertical className="h-4 w-4" />
-                                            </Button>
+                                            <div className="relative inline-block">
+                                                <Button
+                                                    variant="ghost" size="icon"
+                                                    className="h-8 w-8 text-gray-400 hover:text-white"
+                                                    onClick={() => setOpenMenuId(openMenuId === tx.id ? null : tx.id)}
+                                                >
+                                                    <MoreVertical className="h-4 w-4" />
+                                                </Button>
+                                                {openMenuId === tx.id && (
+                                                    <div className="absolute right-0 mt-1 w-36 bg-neutral-800 border border-neutral-700 rounded-md shadow-lg z-10">
+                                                        <button
+                                                            className="w-full text-left px-4 py-2 text-sm text-red-400 hover:bg-neutral-700 rounded-md"
+                                                            onClick={() => handleDeletePayment(tx.id)}
+                                                        >
+                                                            Eliminar
+                                                        </button>
+                                                    </div>
+                                                )}
+                                            </div>
                                         </td>
                                     </tr>
                                 ))}

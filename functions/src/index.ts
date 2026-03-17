@@ -32,11 +32,8 @@ export const twilioWebhookWhatsapp = functions
                 timestamp: admin.firestore.FieldValue.serverTimestamp()
             });
 
-            const twiml = `
-        <Response>
-            <Message>${replyText}</Message>
-        </Response>
-        `;
+            const safeReply = (replyText || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            const twiml = `<?xml version="1.0" encoding="UTF-8"?><Response><Message>${safeReply}</Message></Response>`;
             res.type('text/xml').send(twiml);
         } catch (error: any) {
             console.error("Error processing message:", error);
@@ -166,14 +163,17 @@ export const createCulqiCharge = functions.https.onRequest(async (req, res) => {
                     }
                     if (snap && !snap.empty) {
                         const today = new Date();
-                        const endDate = new Date();
-                        endDate.setMonth(today.getMonth() + 1);
                         const memberData = snap.docs[0].data();
+                        // Extender desde la fecha de vencimiento actual si aún no venció, si no desde hoy
+                        const currentEnd = memberData.endDate ? new Date(memberData.endDate) : today;
+                        const baseDate = currentEnd > today ? currentEnd : today;
+                        const endDate = new Date(baseDate);
+                        endDate.setMonth(endDate.getMonth() + 1);
                         const prevPaid = Number(memberData.amountPaid) || 0;
                         await snap.docs[0].ref.update({
                             status: 'active',
                             plan: planName || 'Plan 1 Mes',
-                            startDate: today.toISOString().split('T')[0],
+                            startDate: baseDate.toISOString().split('T')[0],
                             endDate: endDate.toISOString().split('T')[0],
                             expirationDate: admin.firestore.Timestamp.fromDate(endDate),
                             amountPaid: prevPaid + (amount / 100),

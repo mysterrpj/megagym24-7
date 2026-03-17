@@ -55,18 +55,30 @@ export async function executeTool(name: string, args: any) {
 
         case 'generate_payment_link':
             try {
-                if (!args.customerName || !args.dni || !args.email) {
-                    return { error: "Faltan datos obligatorios. Necesito: nombre completo, DNI y email del cliente." };
+                // Buscar datos del miembro si no vienen como argumento
+                let customerName = args.customerName;
+                let dni = args.dni;
+                let email = args.email;
+
+                if (!customerName || !dni || !email) {
+                    const memSnap = await findMember(dbInner, args.phone);
+                    if (memSnap && !memSnap.empty) {
+                        const memData = memSnap.docs[0].data();
+                        customerName = customerName || memData.name || 'Usuario';
+                        dni = dni || memData.dni || '';
+                        email = email || memData.email || 'cliente@megagym.pe';
+                    }
                 }
+
                 const response = await fetch('https://us-central1-fit-ia-megagym.cloudfunctions.net/generateCulqiLink', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         phone: args.phone,
                         planName: args.planName,
-                        customerName: args.customerName,
-                        dni: args.dni,
-                        email: args.email
+                        customerName,
+                        dni,
+                        email
                     })
                 });
                 const data = await response.json();
@@ -109,13 +121,26 @@ export async function executeTool(name: string, args: any) {
                 if (!snap) return { error: "No se encontró al miembro con ese número." };
                 const member = snap.docs[0].data();
 
-                const amountPaid = Number(member.amountPaid) || 0;
+                // Usar el monto del último pago, no el acumulado
+                const lastPayment = member.payments?.[member.payments.length - 1];
+                const amountPaid = Number(lastPayment?.amount) || Number(member.planPrice) || Number(member.amountPaid) || 0;
                 const planPrice = Number(member.planPrice) || 0;
                 const debt = Math.max(0, planPrice - amountPaid);
-
-                // Último pago del array (puede venir de Culqi o efectivo)
-                const lastPayment = member.payments?.[member.payments.length - 1];
                 const lastMethod = lastPayment?.method || (member.culqiOrderId ? 'Culqi' : 'Efectivo');
+
+                // Resolver fecha de inicio
+                let startDateStr = member.startDate || '';
+                if (!startDateStr && member.createdAt) {
+                    const d = member.createdAt.toDate ? member.createdAt.toDate() : new Date(member.createdAt);
+                    startDateStr = d.toISOString().split('T')[0];
+                }
+
+                // Resolver fecha de fin
+                let endDateStr = member.endDate || '';
+                if (!endDateStr && member.expirationDate) {
+                    const d = member.expirationDate.toDate ? member.expirationDate.toDate() : new Date(member.expirationDate);
+                    endDateStr = d.toISOString().split('T')[0];
+                }
 
                 const lines = [
                     `━━━━━━━━━━━━━━━━━━━━━`,
@@ -124,8 +149,8 @@ export async function executeTool(name: string, args: any) {
                     `━━━━━━━━━━━━━━━━━━━━━`,
                     `👤 Cliente: ${(member.name || 'Cliente').toUpperCase()}`,
                     `📋 Plan: ${member.plan || 'N/A'}`,
-                    `📅 Inicio: ${member.startDate || 'N/A'}`,
-                    `📅 Vigencia hasta: ${member.endDate || 'N/A'}`,
+                    `📅 Inicio: ${startDateStr || 'N/A'}`,
+                    `📅 Vigencia hasta: ${endDateStr || 'N/A'}`,
                     `✅ Estado: ACTIVO`,
                 ];
 
@@ -202,17 +227,17 @@ export async function processMessage(db: any, phone: string, messageText: string
             type: "function",
             function: {
                 name: "generate_payment_link",
-                description: "Generate a payment link (Culqi) for a specific plan. IMPORTANT: You MUST have the user's full name, DNI, and email BEFORE calling this function.",
+                description: "Generate a payment link (Culqi) for a specific plan. Call this immediately when the user wants to pay or renew. If the customer is registered, their data is already available — do NOT ask the user for it.",
                 parameters: {
                     type: "object",
                     properties: {
                         phone: { type: "string", description: "User's phone number" },
-                        planName: { type: "string", description: "Name of the plan" },
-                        customerName: { type: "string", description: "User's FULL NAME" },
-                        dni: { type: "string", description: "User's DNI" },
-                        email: { type: "string", description: "User's email" }
+                        planName: { type: "string", description: "Name of the plan (e.g. '1 mes', '2 meses', '3 meses')" },
+                        customerName: { type: "string", description: "User's full name (optional if already registered)" },
+                        dni: { type: "string", description: "User's DNI (optional if already registered)" },
+                        email: { type: "string", description: "User's email (optional if already registered)" }
                     },
-                    required: ["phone", "planName", "customerName", "dni", "email"]
+                    required: ["phone", "planName"]
                 }
             }
         },
@@ -254,7 +279,7 @@ export async function processMessage(db: any, phone: string, messageText: string
 
     if (memberDoc && !memberDoc.empty) {
         const data = memberDoc.docs[0].data();
-        customerContext = `CLIENTE REGISTRADO: ${data.name}. Plan: ${data.plan || 'sin plan'}. Estado: ${data.status || 'prospecto'}. Vence: ${data.endDate || 'N/A'}.`;
+        customerContext = `CLIENTE REGISTRADO: Nombre: ${data.name || 'N/A'}. DNI: ${data.dni || 'N/A'}. Email: ${data.email || 'N/A'}. Plan: ${data.plan || 'sin plan'}. Estado: ${data.status || 'prospecto'}. Vence: ${data.endDate || 'N/A'}.`;
     }
 
     const historySnapshot = await db.collection('messages')
@@ -270,7 +295,8 @@ export async function processMessage(db: any, phone: string, messageText: string
 
     messages.push({ role: 'user', content: messageText });
 
-    const systemPrompt = `Eres Sofía de MegaGym. Teléfono: ${phone}. Contexto: ${customerContext}
+    const systemPrompt = `Eres Sofía de MegaGym. Teléfono del cliente: ${phone}. Contexto: ${customerContext}
+    REGLA CRÍTICA: Si el cliente está REGISTRADO, YA TIENES su nombre, DNI y email en el contexto anterior. NO los pidas al usuario. Úsalos directamente para generar el link de pago.
     REGLA: Si un tool devuelve éxito, CONFÍRMALO y no digas que hay fallos.`;
 
     const response = await openai.chat.completions.create({

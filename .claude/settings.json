@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(firebase functions:secrets:set CULQI_SECRET_KEY)",
+      "Bash(firebase functions:config:set culqi.private_key=\"sk_live_P0hisBMU7NT5fnah\")",
+      "Read(//c/Users/Lenovo/PROYECTOS CLAUDE CODE/**)",
+      "Bash(node -e \":*)",
+      "Bash(GOOGLE_CLOUD_PROJECT=fit-ia-megagym node -e \":*)",
+      "Read(//c/Users/Lenovo/AppData/Roaming/gcloud/**)",
+      "Bash(firebase firestore:delete --help)",
+      "Bash(firebase login:list)",
+      "Bash(gcloud auth:*)",
+      "Read(//c/Users/Lenovo/.config/firebase/**)",
+      "Read(//c/Users/Lenovo/.config/**)",
+      "Read(//c/Users/Lenovo/AppData/Roaming/firebase//**)",
+      "Read(//c/Users/Lenovo/AppData/**)",
+      "Read(//c/Users/Lenovo/**)",
+      "Bash(xargs grep:*)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); tokens=d.get\\(''''tokens'''',{}\\); print\\(tokens.get\\(''''refresh_token'''',''''''''\\)[:30]\\)\")",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(list\\(d.keys\\(\\)\\)\\)\\)\")",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d.get\\(''''tokens'''',{}\\), indent=2\\)\\)\")"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\Lenovo\\.claude\\projects\\c--Users-Lenovo-PROYECTOS-CLAUDE-CODE-24-7chatmegagym"
+    ]
+  }
+}

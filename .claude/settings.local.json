@@ -13,7 +13,11 @@
       "Bash(robocopy:*)",
       "Bash(powershell -Command:*)",
       "Bash(xcopy /E /I /Y \"c:\\\\Users\\\\Lenovo\\\\PROYECTOS CLAUDE CODE\\\\24-7chatmegagym\\\\src\" \"src\")",
-      "Bash(xcopy:*)"
+      "Bash(xcopy:*)",
+      "Bash(node -e \"const pkg = require\\(''./node_modules/firebase-functions/package.json''\\); console.log\\(''firebase-functions version:'', pkg.version\\);\")",
+      "Bash(timeout 5 node -e \":*)",
+      "Bash(firebase --version)",
+      "Bash(node -e \":*)"
     ]
   }
 }
