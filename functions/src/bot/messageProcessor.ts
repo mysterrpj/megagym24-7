@@ -109,9 +109,14 @@ export async function executeTool(name: string, args: any) {
                 if (!snap) return { error: "No se encontró al miembro con ese número." };
                 const member = snap.docs[0].data();
 
-                const lastPayment = member.payments?.[member.payments.length - 1];
+                const amountPaid = Number(member.amountPaid) || 0;
+                const planPrice = Number(member.planPrice) || 0;
+                const debt = Math.max(0, planPrice - amountPaid);
 
-                // Construir voucher con los datos disponibles (pago directo o membresía manual)
+                // Último pago del array (puede venir de Culqi o efectivo)
+                const lastPayment = member.payments?.[member.payments.length - 1];
+                const lastMethod = lastPayment?.method || (member.culqiOrderId ? 'Culqi' : 'Efectivo');
+
                 const lines = [
                     `━━━━━━━━━━━━━━━━━━━━━`,
                     `🏋️ *MEGAGYM* 🏋️`,
@@ -121,12 +126,15 @@ export async function executeTool(name: string, args: any) {
                     `📋 Plan: ${member.plan || 'N/A'}`,
                     `📅 Inicio: ${member.startDate || 'N/A'}`,
                     `📅 Vigencia hasta: ${member.endDate || 'N/A'}`,
-                    `✅ Estado: ${member.status === 'active' ? 'ACTIVO' : (member.status || 'N/A').toUpperCase()}`,
+                    `✅ Estado: ACTIVO`,
                 ];
 
-                if (lastPayment?.amount) {
-                    lines.push(`💰 Monto: S/ ${lastPayment.amount.toFixed(2)}`);
-                    lines.push(`💳 Método: Culqi`);
+                if (amountPaid > 0) {
+                    lines.push(`💰 Pagado: S/ ${amountPaid.toFixed(2)}`);
+                    lines.push(`💳 Método: ${lastMethod}`);
+                }
+                if (debt > 0) {
+                    lines.push(`⚠️ Saldo pendiente: S/ ${debt.toFixed(2)}`);
                 }
                 if (member.culqiOrderId || lastPayment?.orderId) {
                     const orderId = (member.culqiOrderId || lastPayment?.orderId).toString().slice(-10).toUpperCase();

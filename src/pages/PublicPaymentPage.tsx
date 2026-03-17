@@ -1,5 +1,5 @@
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -25,9 +25,10 @@ export const PublicPaymentPage = () => {
     const [processing, setProcessing] = useState(false);
     const [status, setStatus] = useState<'initial' | 'ready' | 'processing' | 'success' | 'error'>('initial');
     const [email, setEmail] = useState('');
+    const emailRef = useRef('');
     const [errorMessage, setErrorMessage] = useState('');
 
-    const PUBLIC_KEY = 'pk_test_bxGG2MOE6tdVoo65';
+    const PUBLIC_KEY = 'pk_live_WUt387fMCj0V4Ofv';
 
     useEffect(() => {
         if (!orderId) {
@@ -57,8 +58,7 @@ export const PublicPaymentPage = () => {
                 title: 'MegaGym Fit IA',
                 currency: 'PEN',
                 description: plan,
-                amount: amount,
-                order: orderId
+                amount: amount
             });
 
             window.culqi = culqiCallback;
@@ -69,62 +69,36 @@ export const PublicPaymentPage = () => {
     };
 
     const culqiCallback = async () => {
+        if (window.Culqi.error) {
+            setErrorMessage(window.Culqi.error.user_message || "Error desconocido");
+            setStatus('ready');
+            return;
+        }
+
         if (window.Culqi.token) {
-            // Token received - need to create charge on backend
-            console.log("Token received:", window.Culqi.token.id);
+            const token = window.Culqi.token.id;
             setProcessing(true);
             setStatus('processing');
             window.Culqi.close();
-
             try {
                 const response = await fetch('https://us-central1-fit-ia-megagym.cloudfunctions.net/createCulqiCharge', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        token: window.Culqi.token.id,
-                        email: email || window.Culqi.token.email,
-                        amount: amount,
-                        orderId: orderId,
-                        phone: phone,
-                        planName: plan
-                    })
+                    body: JSON.stringify({ token, email: emailRef.current, amount, orderId, phone, planName: plan })
                 });
-
                 const result = await response.json();
-
                 if (response.ok && result.success) {
                     setStatus('success');
                 } else {
                     setErrorMessage(result.error || 'Error al procesar el pago');
                     setStatus('ready');
                 }
-            } catch (error: any) {
-                console.error("Charge error:", error);
+            } catch (e) {
                 setErrorMessage('Error de conexión. Intenta de nuevo.');
                 setStatus('ready');
             } finally {
                 setProcessing(false);
             }
-
-        } else if (window.Culqi.order) {
-            // Order API response
-            const order = window.Culqi.order;
-            console.log("Order state:", order.state);
-
-            if (order.state === 'paid') {
-                setStatus('success');
-                window.Culqi.close();
-            } else if (order.state === 'pending') {
-                alert("Tu pago está pendiente. Si usaste PagoEfectivo, recuerda pagar tu código CIP.");
-                window.Culqi.close();
-            } else {
-                setErrorMessage(window.Culqi.error?.user_message || "Error en el pago");
-                setStatus('ready');
-            }
-        } else if (window.Culqi.error) {
-            console.error("Culqi Error:", window.Culqi.error);
-            setErrorMessage(window.Culqi.error.user_message || "Error desconocido");
-            setStatus('ready');
         }
     };
 
@@ -156,12 +130,9 @@ export const PublicPaymentPage = () => {
                         <p className="text-zinc-500 text-sm">
                             Ya puedes disfrutar de todos los beneficios del gimnasio.
                         </p>
-                        <Button
-                            className="w-full bg-yellow-500 text-black hover:bg-yellow-400 font-bold"
-                            onClick={() => window.close()}
-                        >
-                            Cerrar
-                        </Button>
+                        <p className="text-zinc-600 text-xs mt-2">
+                            Puedes cerrar esta pestaña.
+                        </p>
                     </CardContent>
                 </Card>
             </div>
@@ -210,7 +181,7 @@ export const PublicPaymentPage = () => {
                             type="email"
                             placeholder="tu@email.com"
                             value={email}
-                            onChange={(e) => setEmail(e.target.value)}
+                            onChange={(e) => { setEmail(e.target.value); emailRef.current = e.target.value; }}
                             className="bg-zinc-800 border-zinc-700 text-white"
                         />
                     </div>

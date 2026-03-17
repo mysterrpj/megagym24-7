@@ -2,11 +2,11 @@ import { useState, useRef, useEffect } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Search, UserPlus, Mail, Phone, MoreHorizontal, ChevronLeft, ChevronRight, X, CreditCard, Edit, Trash, Loader2 } from 'lucide-react';
+import { Search, UserPlus, Mail, Phone, MoreHorizontal, ChevronLeft, ChevronRight, X, CreditCard, Edit, Trash, Loader2, Banknote } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { httpsCallable } from 'firebase/functions';
 import { functions, db } from '@/lib/firebase';
-import { collection, onSnapshot, query, orderBy, addDoc, updateDoc, doc, deleteDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, addDoc, updateDoc, doc, deleteDoc, serverTimestamp, arrayUnion } from 'firebase/firestore';
 
 // Type definitions
 interface Member {
@@ -89,21 +89,20 @@ function MemberModal({
 
     // Auto-update expiration date based on PLAN and JOIN DATE
     useEffect(() => {
-        // Calculate based on JOIN DATE, not just "today"
+        if (!joinDate || joinDate.length < 10) return;
         const [y, m, d] = joinDate.split('-').map(Number);
+        if (!y || !m || !d) return;
         const baseDate = new Date(y, m - 1, d);
+        if (isNaN(baseDate.getTime())) return;
 
         const newDate = new Date(baseDate);
         if (plan.includes('Trimestral')) newDate.setMonth(newDate.getMonth() + 3);
         else if (plan.includes('Mensual')) newDate.setMonth(newDate.getMonth() + 1);
         else newDate.setFullYear(newDate.getFullYear() + 1);
 
-        // Only update if the plan actually CHANGED from the initial member plan OR if it's a new member OR if join date changed
-        // We want to be helpful but not annoying. If I change join date, expiration SHOULD change 99% of time.
-        // If I change plan, expiration SHOULD change.
-        // Let's just update it. The user can manually fix expiration afterwards if they want special case.
-        setExpirationDate(newDate.toISOString().split('T')[0]);
-
+        if (!isNaN(newDate.getTime())) {
+            setExpirationDate(newDate.toISOString().split('T')[0]);
+        }
     }, [plan, joinDate]);
 
     // Update price based on plan selection
@@ -117,22 +116,15 @@ function MemberModal({
 
     // Auto-update status based on expiration date
     useEffect(() => {
-        if (!expirationDate) return;
-
+        if (!expirationDate || expirationDate.length < 10) return;
+        const [y, m, d] = expirationDate.split('-').map(Number);
+        if (!y || !m || !d) return;
+        const expDate = new Date(y, m - 1, d);
+        if (isNaN(expDate.getTime())) return;
+        expDate.setHours(0, 0, 0, 0);
         const today = new Date();
         today.setHours(0, 0, 0, 0);
-
-        // Parse expirationDate string (YYYY-MM-DD) to Date object in local time
-        const [y, m, d] = expirationDate.split('-').map(Number);
-        const expDate = new Date(y, m - 1, d);
-        expDate.setHours(0, 0, 0, 0);
-
-        if (expDate < today) {
-            setStatus('overdue');
-        } else {
-            // If date is valid (future/today), change to active
-            setStatus('active');
-        }
+        setStatus(expDate < today ? 'overdue' : 'active');
     }, [expirationDate]);
 
     const debt = Math.max(0, (parseFloat(planPrice) || 0) - (parseFloat(amountPaid) || 0));
@@ -446,13 +438,84 @@ function PaymentModal({
     );
 }
 
+// Cash Payment Modal Component
+function CashPaymentModal({
+    member,
+    onClose,
+    onSubmit
+}: {
+    member: Member;
+    onClose: () => void;
+    onSubmit: (amount: number, method: string) => void;
+}) {
+    const debt = Math.max(0, (member.planPrice || 0) - (member.amountPaid || 0));
+    const [amount, setAmount] = useState(debt > 0 ? debt.toString() : '');
+    const [method, setMethod] = useState('efectivo');
+    const [loading, setLoading] = useState(false);
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        const parsed = parseFloat(amount);
+        if (isNaN(parsed) || parsed <= 0) return;
+        setLoading(true);
+        await onSubmit(parsed, method);
+        setLoading(false);
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+            <div className="bg-neutral-900 border border-neutral-800 rounded-xl w-full max-w-sm p-6 space-y-5">
+                <div className="flex justify-between items-center">
+                    <h2 className="text-white font-semibold text-lg">Registrar Pago en Efectivo</h2>
+                    <button onClick={onClose} className="text-gray-500 hover:text-white"><X className="w-5 h-5" /></button>
+                </div>
+                <p className="text-gray-400 text-sm">Cliente: <span className="text-white font-medium">{member.name}</span></p>
+                {debt > 0 && (
+                    <p className="text-yellow-400 text-sm">Deuda pendiente: <span className="font-semibold">S/ {debt.toFixed(2)}</span></p>
+                )}
+                <form onSubmit={handleSubmit} className="space-y-4">
+                    <div>
+                        <label className="text-gray-400 text-sm block mb-1">Monto (S/)</label>
+                        <Input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={amount}
+                            onChange={e => setAmount(e.target.value)}
+                            className="bg-neutral-800 border-neutral-700 text-white"
+                            placeholder="0.00"
+                            required
+                        />
+                    </div>
+                    <div>
+                        <label className="text-gray-400 text-sm block mb-1">Método de pago</label>
+                        <select
+                            value={method}
+                            onChange={e => setMethod(e.target.value)}
+                            className="w-full bg-neutral-800 border border-neutral-700 text-white rounded-md px-3 py-2 text-sm"
+                        >
+                            <option value="efectivo">Efectivo</option>
+                            <option value="transferencia">Transferencia</option>
+                            <option value="yape">Yape / Plin</option>
+                        </select>
+                    </div>
+                    <Button type="submit" disabled={loading} className="w-full bg-green-600 hover:bg-green-700">
+                        {loading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Banknote className="w-4 h-4 mr-2" />}
+                        Registrar Pago
+                    </Button>
+                </form>
+            </div>
+        </div>
+    );
+}
+
 // Actions Menu Component
 function MemberActionsMenu({
     member,
     onAction
 }: {
     member: Member;
-    onAction: (action: 'payment' | 'edit' | 'delete', member: Member) => void
+    onAction: (action: 'payment' | 'cashPayment' | 'edit' | 'delete', member: Member) => void
 }) {
     const [isOpen, setIsOpen] = useState(false);
     const menuRef = useRef<HTMLDivElement>(null);
@@ -469,7 +532,7 @@ function MemberActionsMenu({
         };
     }, []);
 
-    const handleClick = (action: 'payment' | 'edit' | 'delete') => {
+    const handleClick = (action: 'payment' | 'cashPayment' | 'edit' | 'delete') => {
         onAction(action, member);
         setIsOpen(false);
     };
@@ -484,7 +547,14 @@ function MemberActionsMenu({
             </button>
 
             {isOpen && (
-                <div className="absolute right-0 z-10 mt-1 w-48 rounded-lg bg-neutral-900 border border-neutral-800 shadow-lg py-1">
+                <div className="absolute right-0 z-10 mt-1 w-52 rounded-lg bg-neutral-900 border border-neutral-800 shadow-lg py-1">
+                    <button
+                        onClick={() => handleClick('cashPayment')}
+                        className="w-full text-left px-3 py-2 text-sm text-yellow-400 hover:bg-neutral-800 flex items-center gap-2"
+                    >
+                        <Banknote className="w-4 h-4" />
+                        Registrar Pago Efectivo
+                    </button>
                     <button
                         onClick={() => handleClick('payment')}
                         className="w-full text-left px-3 py-2 text-sm text-green-500 hover:bg-neutral-800 flex items-center gap-2"
@@ -522,6 +592,7 @@ export function MembersPage() {
     const [modalMode, setModalMode] = useState<'create' | 'edit' | 'none'>('none');
     const [selectedMember, setSelectedMember] = useState<Member | undefined>(undefined);
     const [showPaymentModal, setShowPaymentModal] = useState(false);
+    const [showCashPaymentModal, setShowCashPaymentModal] = useState(false);
 
     // Real-time Firestore Subscription
     useEffect(() => {
@@ -542,16 +613,21 @@ export function MembersPage() {
                 } else {
                     // Fallback to calculation
                     expDateObj = new Date(created);
-                    if (planName.includes('trimestral')) {
+                    if (planName.includes('trimestral') || planName.includes('3 mes')) {
                         expDateObj.setMonth(expDateObj.getMonth() + 3);
-                    } else if (planName.includes('mensual')) {
+                    } else if (planName.includes('mensual') || planName.includes('1 mes') || planName.includes('mes')) {
                         expDateObj.setMonth(expDateObj.getMonth() + 1);
                     } else {
-                        expDateObj.setFullYear(expDateObj.getFullYear() + 1); // Default 1 year for others
+                        expDateObj.setFullYear(expDateObj.getFullYear() + 1);
                     }
                 }
 
                 expirationDate = expDateObj.toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' });
+
+                // Si está activo pero ya venció, mostrar como vencido
+                const now = new Date();
+                const storedStatus = data.status || 'prospect';
+                const computedStatus = (storedStatus === 'active' && expDateObj < now) ? 'overdue' : storedStatus;
 
                 return {
                     id: doc.id,
@@ -561,7 +637,7 @@ export function MembersPage() {
                     phone: data.phone || '',
                     plan: data.plan || '',
                     joinDate: data.createdAt?.toDate().toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' }) || 'Reciente',
-                    status: data.status || 'prospect',
+                    status: computedStatus as Member['status'],
                     avatarColor: `bg-${['green', 'blue', 'purple', 'orange', 'pink'][Math.floor(Math.random() * 5)]}-600`,
                     amountPaid: data.amountPaid,
                     planPrice: data.planPrice,
@@ -578,10 +654,13 @@ export function MembersPage() {
     }, []);
 
     // Handlers
-    const handleAction = (action: 'payment' | 'edit' | 'delete', member: Member) => {
+    const handleAction = (action: 'payment' | 'cashPayment' | 'edit' | 'delete', member: Member) => {
         if (action === 'payment') {
             setSelectedMember(member);
             setShowPaymentModal(true);
+        } else if (action === 'cashPayment') {
+            setSelectedMember(member);
+            setShowCashPaymentModal(true);
         } else if (action === 'edit') {
             setSelectedMember(member);
             setModalMode('edit');
@@ -590,6 +669,48 @@ export function MembersPage() {
                 deleteDoc(doc(db, 'members', member.id));
             }
         }
+    };
+
+    const handleCashPayment = async (amount: number, method: string) => {
+        if (!selectedMember) return;
+        const memberRef = doc(db, 'members', selectedMember.id);
+        const today = new Date();
+        const endDate = new Date();
+        endDate.setMonth(today.getMonth() + 1);
+
+        const planPrice = selectedMember.planPrice || 0;
+        const prevPaid = selectedMember.amountPaid || 0;
+        const newTotalPaid = prevPaid + amount;
+        const newDebt = Math.max(0, planPrice - newTotalPaid);
+
+        // Update member status and amountPaid (NO tocar fechas existentes)
+        await updateDoc(memberRef, {
+            status: 'active',
+            amountPaid: newTotalPaid,
+            debt: newDebt,
+            payments: arrayUnion({ amount, method, date: today.toISOString() }),
+            updatedAt: serverTimestamp()
+        });
+
+        // Add to `payments` collection so it appears in PaymentsPage
+        const methodMap: Record<string, string> = {
+            efectivo: 'Efectivo',
+            transferencia: 'Transferencia',
+            yape: 'Yape / Plin'
+        };
+        await addDoc(collection(db, 'payments'), {
+            memberName: selectedMember.name,
+            memberId: selectedMember.id,
+            concept: selectedMember.plan || 'Membresía',
+            amount,
+            method: methodMap[method] || method,
+            invoiceType: 'Boleta',
+            date: today,
+            createdAt: serverTimestamp()
+        });
+
+        setShowCashPaymentModal(false);
+        setSelectedMember(undefined);
     };
 
     const handleCreateOrUpdateMember = async (data: any) => {
@@ -625,8 +746,11 @@ export function MembersPage() {
                     status: data.status,
                     amountPaid: data.amountPaid,
                     planPrice: data.planPrice,
-                    expirationDate: expirationDateObj, // Save Date
-                    createdAt: joinDateObj, // Update Join Date too if edited
+                    debt: data.debt || 0,
+                    expirationDate: expirationDateObj,
+                    startDate: data.joinDateStr,
+                    endDate: data.expirationDateStr,
+                    createdAt: joinDateObj,
                     updatedAt: serverTimestamp()
                 });
             }
@@ -839,6 +963,15 @@ export function MembersPage() {
                 <PaymentModal
                     member={selectedMember}
                     onClose={() => setShowPaymentModal(false)}
+                />
+            )}
+
+            {/* Cash Payment Modal */}
+            {showCashPaymentModal && selectedMember && (
+                <CashPaymentModal
+                    member={selectedMember}
+                    onClose={() => { setShowCashPaymentModal(false); setSelectedMember(undefined); }}
+                    onSubmit={handleCashPayment}
                 />
             )}
         </div>

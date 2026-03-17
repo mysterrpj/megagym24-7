@@ -91,5 +91,6 @@ export async function generatePaymentLink(phone: string, planName: string) {
         throw new Error("Culqi did not return an order ID");
     }
 
-    return `https://fit-ia-megagym.web.app/pagar?orderId=${orderId}`;
+    const encodedPlan = encodeURIComponent(planName || 'Plan 1 Mes');
+    return `https://fit-ia-megagym.web.app/pagar?orderId=${orderId}&phone=${encodeURIComponent(phone)}&plan=${encodedPlan}&amount=${amount}`;
 }
