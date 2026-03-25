@@ -24,6 +24,7 @@ interface Member {
     expirationDate?: string;
     rawJoinDate?: any;
     expirationDateObj?: Date;
+    diet?: string;
 }
 
 const PLAN_OPTIONS = [
@@ -77,6 +78,7 @@ function MemberModal({
     const [diasSemana, setDiasSemana] = useState((member as any)?.trainingProfile?.diasSemana?.toString() || '');
     const [limitaciones, setLimitaciones] = useState((member as any)?.trainingProfile?.limitaciones || '');
     const [notasTrainer, setNotasTrainer] = useState((member as any)?.trainingProfile?.notasTrainer || '');
+    const [diet, setDiet] = useState(member?.diet || '');
 
     // Payment fields
     const [planPrice, setPlanPrice] = useState(member?.planPrice?.toString() || '80');
@@ -175,6 +177,7 @@ function MemberModal({
             expirationDateStr: expirationDate,
             joinDateStr: joinDate,
             debt: debt,
+            diet: diet,
             trainingProfile: objetivo ? { objetivo, nivel, diasSemana: parseInt(diasSemana) || 0, limitaciones, notasTrainer } : null
         });
         onClose();
@@ -335,6 +338,18 @@ function MemberModal({
                             <p className="text-xs text-red-500 font-bold">⚠️ Deuda Pendiente: S/ {debt.toFixed(2)}</p>
                         </div>
                     )}
+                </div>
+
+                {/* Diet Section */}
+                <div className="mt-3">
+                    <label className="block text-sm text-gray-400 mb-2">Dieta Actual (Para Bot)</label>
+                    <textarea
+                        value={diet}
+                        onChange={(e) => setDiet(e.target.value)}
+                        placeholder="Pega aquí el texto de la dieta desde ChatGPT..."
+                        rows={4}
+                        className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-green-500"
+                    />
                 </div>
 
                 {/* Training Profile (optional) */}
@@ -874,7 +889,8 @@ export function MembersPage() {
                     planPrice: data.planPrice,
                     expirationDate,
                     expirationDateObj: expDateObj,
-                    rawJoinDate: data.createdAt
+                    rawJoinDate: data.createdAt,
+                    diet: data.diet || ''
                 };
             });
             setMembers(fetchedMembers);
@@ -992,6 +1008,7 @@ export function MembersPage() {
                     endDate: data.expirationDateStr || '',
                     expirationDate: expirationDateObj,
                     createdAt: joinDateObj,
+                    diet: data.diet || '',
                     ...(data.trainingProfile ? { trainingProfile: data.trainingProfile } : {})
                 });
             } else if (modalMode === 'edit' && data.id) {
@@ -1010,6 +1027,7 @@ export function MembersPage() {
                     endDate: data.expirationDateStr,
                     createdAt: joinDateObj,
                     updatedAt: serverTimestamp(),
+                    diet: data.diet || '',
                     ...(data.trainingProfile ? { trainingProfile: data.trainingProfile } : {})
                 });
             }

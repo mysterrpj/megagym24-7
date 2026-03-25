@@ -281,6 +281,19 @@ export async function executeTool(name: string, args: any) {
                 return { error: e.message };
             }
 
+        case 'get_student_diet':
+            try {
+                const snap = await findMember(dbInner, args.phone);
+                if (!snap) return { found: false, message: 'No se encontró tu perfil de alumno.' };
+                const memberData = snap.docs[0].data();
+                if (!memberData.diet) {
+                    return { found: false, message: 'Aún no tienes una dieta asignada en tu perfil.' };
+                }
+                return { found: true, diet: memberData.diet };
+            } catch (e: any) {
+                return { error: e.message };
+            }
+
         default:
             return { error: "Tool not found" };
     }
@@ -374,6 +387,20 @@ export async function processMessage(db: any, phone: string, messageText: string
                     type: "object",
                     properties: {
                         phone: { type: "string", description: "El número de teléfono del usuario para buscar su rutina. USA SIEMPRE el que recibes en el contexto." },
+                    },
+                    required: ["phone"]
+                }
+            }
+        },
+        {
+            type: "function",
+            function: {
+                name: "get_student_diet",
+                description: "Obtener la dieta personalizada asignada al cliente. Úsalo cuando el cliente pida su dieta, plan nutricional o pregunte qué comer.",
+                parameters: {
+                    type: "object",
+                    properties: {
+                        phone: { type: "string", description: "El número de teléfono del usuario para buscar su dieta. USA SIEMPRE el que recibes en el contexto." },
                     },
                     required: ["phone"]
                 }
@@ -480,7 +507,8 @@ export async function processMessage(db: any, phone: string, messageText: string
             else if (!profile.diasSemana) profileQuestion = `¿Cuántos días a la semana puedes venir a entrenar para armar algo realista? 🔥`;
         }
 
-        customerContext = `CLIENTE REGISTRADO: Nombre: ${data.name || 'N/A'}. DNI: ${data.dni || 'N/A'}. Email: ${data.email || 'N/A'}. Plan: ${data.plan || 'sin plan'}. Estado: ${data.status || 'prospect'}. Vence: ${data.endDate || 'N/A'}. Perfil Entrenamiento: ${profileStr}`;
+        const hasDiet = data.diet ? 'Sí (asignada)' : 'No (sin asignar)';
+        customerContext = `CLIENTE REGISTRADO: Nombre: ${data.name || 'N/A'}. DNI: ${data.dni || 'N/A'}. Email: ${data.email || 'N/A'}. Plan: ${data.plan || 'sin plan'}. Estado: ${data.status || 'prospect'}. Vence: ${data.endDate || 'N/A'}. Dieta Asignada: ${hasDiet}. Perfil Entrenamiento: ${profileStr}`;
     }
 
     const historySnapshot = await db.collection('messages')
@@ -495,6 +523,9 @@ export async function processMessage(db: any, phone: string, messageText: string
     }));
 
     messages.push({ role: 'user', content: messageText });
+
+    // Detect first-time user (no previous messages in history)
+    const isFirstContact = historySnapshot.empty;
 
     const profileQuestionInstruction = profileQuestion
         ? `\n    PREGUNTA DE PERFIL PENDIENTE: Al final de tu respuesta (después de responder lo que el cliente pidió), añade esta pregunta de forma natural: "${profileQuestion}". Si el cliente responde, guarda con update_member_profile.`
@@ -529,12 +560,19 @@ export async function processMessage(db: any, phone: string, messageText: string
     TU MISIÓN:
     1. Si te preguntan "¿Está abierto?" o sobre el horario, usa la hora actual (${currentTime}) y el día (${currentDay}) para responder con precisión.
     2. REGLAS DE SALUDO (Solo si el cliente inicia la charla con un saludo):
-        - Miembro ACTIVO con vencimiento en <= 7 días: Saluda y avisa: "Tu membresía vence el ${memberDoc && !memberDoc.empty ? memberDoc.docs[0].data().endDate : ''} (en ${daysUntilExpiry} días). ¿Te ayudo a renovar?"
+        - PRIMER CONTACTO (nunca ha hablado antes con el bot): Si es el primer mensaje del cliente, IGNORA todas las alertas de vencimiento y preséntate como Sofía de forma cálida. Dile que eres su asistente personal de MegaGym y menciona brevemente qué puedes hacer (rutinas, dieta, horarios, pagos). Ejemplo: "¡Hola ${clientFirstName || ''}! 😊 Soy Sofía, tu asistente personal de MegaGym 💪 Puedo ayudarte con tu rutina, tu dieta, horarios y pagos. ¿En qué te puedo ayudar hoy?" El campo isFirstContact = ${isFirstContact}.
+        - Miembro ACTIVO con vencimiento en <= 3 días: Saluda y avisa: "Tu membresía vence el ${memberDoc && !memberDoc.empty ? memberDoc.docs[0].data().endDate : ''} (en ${daysUntilExpiry} días). ¿Te ayudo a renovar?"
         - Miembro VENCIDO: "Tu membresía venció el ${memberDoc && !memberDoc.empty ? memberDoc.docs[0].data().endDate : ''}. ¡Te esperamos de vuelta para seguir dándole duro! 💪"
     3. Si el cliente está REGISTRADO, usa su nombre (${clientFirstName}) y NO le pidas datos que ya tienes (DNI, email).
-    4. Si pide su rutina, usa 'get_student_routine'.
+    4. Si pide su rutina, usa 'get_student_routine'. Si pide su dieta, usa 'get_student_diet'.
     5. Si responde a tus preguntas de perfil (objetivo, nivel, etc.), usa 'update_member_profile' inmediatamente.
-    6. Mensajes CORTOS (máx 3 oraciones), usa emojis (💪, 😊, 🔥) y termina con una pregunta motivadora.${profileQuestionInstruction}`;
+    6. ENTREGA DE DIETA (NIVEL EXPERTO): Cuando uses 'get_student_diet', NUNCA envíes todo el plan de golpe. Sigue esta lógica exacta:
+       a) Usa el día actual (${currentDay}) para identificar qué grupo de días del plan corresponde HOY. Regla general para planes semanales de 3 grupos: Lunes/Martes/Miércoles → Días 1-3, Jueves/Viernes → Días 4-5, Sábado/Domingo → Días 6-7.
+       b) Menciona proactivamente a qué fase/grupo pertenece hoy y su nombre de la dieta (ej. "Alta Rendimiento", "Variación Metabólica", "Bajo en Carbs").
+       c) Pregúntale qué comida quiere ver ahora (Desayuno, Almuerzo o Cena) o si prefiere ver también la suplementación.
+       d) EJEMPLO de respuesta ideal: "¡Hola Robert! 💪 Hoy es ${currentDay}, que corresponde a tu fase de *Variación Metabólica* (Días 4-5). ¿Quieres ver tu almuerzo de hoy o la suplementación pre-entreno? 🍗"
+       e) Entrega las porciones de forma interactiva y con emojis de alimentos (🍗🥑🍳🥩).
+    7. Resto de Mensajes: CORTOS (máx 3 oraciones), usa emojis (💪, 😊, 🔥) y termina con una pregunta motivadora.${profileQuestionInstruction}`;
 
     const response = await openai.chat.completions.create({
         model: 'gpt-4o',
