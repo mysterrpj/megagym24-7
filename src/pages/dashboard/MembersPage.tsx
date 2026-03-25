@@ -26,6 +26,12 @@ interface Member {
     expirationDateObj?: Date;
 }
 
+const PLAN_OPTIONS = [
+    { name: 'Plan Mensual', price: 80, days: 30 },
+    { name: 'Plan Trimestral', price: 150, days: 90 },
+    { name: 'Membresía Fit 2026', price: 80, days: 365 },
+];
+
 const TRAINING_TEMPLATES = [
     { value: '', label: 'Sin perfil' },
     { value: 'perdida_peso', label: '🔥 Pérdida de peso', objetivo: 'Pérdida de peso', nivel: 'Principiante', diasSemana: 3 },
@@ -565,19 +571,63 @@ function CashPaymentModal({
 }: {
     member: Member;
     onClose: () => void;
-    onSubmit: (amount: number, method: string) => void;
+    onSubmit: (amount: number, method: string, renewalData?: { plan: string; planPrice: number; startDate: Date }) => void;
 }) {
+    const isOverdue = member.status === 'overdue';
     const debt = Math.max(0, (member.planPrice || 0) - (member.amountPaid || 0));
     const [amount, setAmount] = useState(debt > 0 ? debt.toString() : '');
     const [method, setMethod] = useState('efectivo');
     const [loading, setLoading] = useState(false);
+
+    // Renewal fields
+    const [isRenewing, setIsRenewing] = useState(isOverdue);
+    const [selectedPlan, setSelectedPlan] = useState(() => {
+        const match = PLAN_OPTIONS.find(p => p.name === member.plan);
+        return match ? match.name : 'Plan Mensual';
+    });
+    const [startDateMode, setStartDateMode] = useState<'prev' | 'today' | 'custom'>('prev');
+    const [customDate, setCustomDate] = useState(new Date().toISOString().split('T')[0]);
+
+    // Auto-update amount when plan changes (only on renewal)
+    useEffect(() => {
+        if (!isRenewing) return;
+        const planOption = PLAN_OPTIONS.find(p => p.name === selectedPlan);
+        if (planOption) setAmount(planOption.price.toString());
+    }, [selectedPlan, isRenewing]);
+
+    const getStartDate = (): Date => {
+        if (startDateMode === 'prev' && member.expirationDateObj) return member.expirationDateObj;
+        if (startDateMode === 'custom') {
+            const [y, m, d] = customDate.split('-').map(Number);
+            return new Date(y, m - 1, d);
+        }
+        return new Date();
+    };
+
+    const previewEndDate = (() => {
+        if (!isRenewing) return null;
+        const planOption = PLAN_OPTIONS.find(p => p.name === selectedPlan);
+        const start = getStartDate();
+        const end = new Date(start);
+        if (planOption) end.setDate(end.getDate() + planOption.days);
+        return end.toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' });
+    })();
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         const parsed = parseFloat(amount);
         if (isNaN(parsed) || parsed <= 0) return;
         setLoading(true);
-        await onSubmit(parsed, method);
+        let renewalData = undefined;
+        if (isRenewing) {
+            const planOption = PLAN_OPTIONS.find(p => p.name === selectedPlan);
+            renewalData = {
+                plan: selectedPlan,
+                planPrice: planOption?.price || (member.planPrice || 80),
+                startDate: getStartDate()
+            };
+        }
+        await onSubmit(parsed, method, renewalData);
         setLoading(false);
     };
 
@@ -589,9 +639,71 @@ function CashPaymentModal({
                     <button onClick={onClose} className="text-gray-500 hover:text-white"><X className="w-5 h-5" /></button>
                 </div>
                 <p className="text-gray-400 text-sm">Cliente: <span className="text-white font-medium">{member.name}</span></p>
-                {debt > 0 && (
+                {debt > 0 && !isRenewing && (
                     <p className="text-yellow-400 text-sm">Deuda pendiente: <span className="font-semibold">S/ {debt.toFixed(2)}</span></p>
                 )}
+
+                {/* Renewal toggle */}
+                <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                        type="checkbox"
+                        checked={isRenewing}
+                        onChange={e => setIsRenewing(e.target.checked)}
+                        className="accent-green-500 w-4 h-4"
+                    />
+                    <span className="text-sm text-gray-300">Renovar membresía</span>
+                </label>
+
+                {isRenewing && (
+                    <div className="space-y-3 border border-neutral-700 rounded-lg p-3">
+                        {/* Plan selector */}
+                        <div>
+                            <label className="text-gray-400 text-sm block mb-1">Plan</label>
+                            <select
+                                value={selectedPlan}
+                                onChange={e => setSelectedPlan(e.target.value)}
+                                className="w-full bg-neutral-800 border border-neutral-700 text-white rounded-md px-3 py-2 text-sm"
+                            >
+                                {PLAN_OPTIONS.map(p => (
+                                    <option key={p.name} value={p.name}>{p.name} — S/ {p.price}</option>
+                                ))}
+                            </select>
+                        </div>
+
+                        {/* Start date options */}
+                        <div>
+                            <label className="text-gray-400 text-sm block mb-1">Fecha de inicio</label>
+                            <div className="space-y-1.5">
+                                <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-300">
+                                    <input type="radio" name="startDate" value="prev" checked={startDateMode === 'prev'} onChange={() => setStartDateMode('prev')} className="accent-green-500" />
+                                    Desde vencimiento anterior ({member.expirationDate})
+                                </label>
+                                <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-300">
+                                    <input type="radio" name="startDate" value="today" checked={startDateMode === 'today'} onChange={() => setStartDateMode('today')} className="accent-green-500" />
+                                    Desde hoy ({new Date().toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' })})
+                                </label>
+                                <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-300">
+                                    <input type="radio" name="startDate" value="custom" checked={startDateMode === 'custom'} onChange={() => setStartDateMode('custom')} className="accent-green-500" />
+                                    Personalizada
+                                </label>
+                                {startDateMode === 'custom' && (
+                                    <input
+                                        type="date"
+                                        value={customDate}
+                                        onChange={e => setCustomDate(e.target.value)}
+                                        className="w-full bg-neutral-800 border border-neutral-700 text-white rounded-md px-3 py-2 text-sm mt-1"
+                                    />
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Preview */}
+                        {previewEndDate && (
+                            <p className="text-green-400 text-xs">Nuevo vencimiento: <span className="font-semibold">{previewEndDate}</span></p>
+                        )}
+                    </div>
+                )}
+
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div>
                         <label className="text-gray-400 text-sm block mb-1">Monto (S/)</label>
@@ -790,37 +902,61 @@ export function MembersPage() {
         }
     };
 
-    const handleCashPayment = async (amount: number, method: string) => {
+    const handleCashPayment = async (amount: number, method: string, renewalData?: { plan: string; planPrice: number; startDate: Date }) => {
         if (!selectedMember) return;
         const memberRef = doc(db, 'members', selectedMember.id);
         const today = new Date();
-        const endDate = new Date();
-        endDate.setMonth(today.getMonth() + 1);
 
-        const planPrice = selectedMember.planPrice || 0;
-        const prevPaid = selectedMember.amountPaid || 0;
-        const newTotalPaid = prevPaid + amount;
-        const newDebt = Math.max(0, planPrice - newTotalPaid);
-
-        // Update member status and amountPaid (NO tocar fechas existentes)
-        await updateDoc(memberRef, {
-            status: 'active',
-            amountPaid: newTotalPaid,
-            debt: newDebt,
-            payments: arrayUnion({ amount, method, date: today.toISOString() }),
-            updatedAt: serverTimestamp()
-        });
-
-        // Add to `payments` collection so it appears in PaymentsPage
         const methodMap: Record<string, string> = {
             efectivo: 'Efectivo',
             transferencia: 'Transferencia',
             yape: 'Yape / Plin'
         };
+
+        let updateData: Record<string, any>;
+
+        if (renewalData) {
+            const planOption = PLAN_OPTIONS.find(p => p.name === renewalData.plan);
+            const newEndDate = new Date(renewalData.startDate);
+            if (planOption) newEndDate.setDate(newEndDate.getDate() + planOption.days);
+
+            const startStr = renewalData.startDate.toISOString().split('T')[0];
+            const endStr = newEndDate.toISOString().split('T')[0];
+            const newDebt = Math.max(0, renewalData.planPrice - amount);
+
+            updateData = {
+                status: 'active',
+                plan: renewalData.plan,
+                planPrice: renewalData.planPrice,
+                amountPaid: amount,
+                debt: newDebt,
+                startDate: startStr,
+                endDate: endStr,
+                expirationDate: newEndDate,
+                payments: arrayUnion({ amount, method, date: today.toISOString() }),
+                updatedAt: serverTimestamp()
+            };
+        } else {
+            const planPrice = selectedMember.planPrice || 0;
+            const prevPaid = selectedMember.amountPaid || 0;
+            const newTotalPaid = prevPaid + amount;
+            const newDebt = Math.max(0, planPrice - newTotalPaid);
+
+            updateData = {
+                status: 'active',
+                amountPaid: newTotalPaid,
+                debt: newDebt,
+                payments: arrayUnion({ amount, method, date: today.toISOString() }),
+                updatedAt: serverTimestamp()
+            };
+        }
+
+        await updateDoc(memberRef, updateData);
+
         await addDoc(collection(db, 'payments'), {
             memberName: selectedMember.name,
             memberId: selectedMember.id,
-            concept: selectedMember.plan || 'Membresía',
+            concept: renewalData?.plan || selectedMember.plan || 'Membresía',
             amount,
             method: methodMap[method] || method,
             invoiceType: 'Boleta',

@@ -18,7 +18,11 @@
       "Bash(xargs grep:*)",
       "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); tokens=d.get\\(''''tokens'''',{}\\); print\\(tokens.get\\(''''refresh_token'''',''''''''\\)[:30]\\)\")",
       "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(list\\(d.keys\\(\\)\\)\\)\\)\")",
-      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d.get\\(''''tokens'''',{}\\), indent=2\\)\\)\")"
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d.get\\(''''tokens'''',{}\\), indent=2\\)\\)\")",
+      "Bash(python3 -c \":*)",
+      "Bash(firebase firestore:bundles export)",
+      "Bash(npx tsc:*)",
+      "Bash(firebase serve:*)"
     ],
     "additionalDirectories": [
       "C:\\Users\\Lenovo\\.claude\\projects\\c--Users-Lenovo-PROYECTOS-CLAUDE-CODE-24-7chatmegagym"

@@ -2,11 +2,18 @@
 
 // Busca un miembro probando múltiples formatos de teléfono
 async function findMember(db: any, phone: string) {
+    const cleanPhone = phone.replace(/\s/g, '');
+    const base = cleanPhone.replace(/^\+?51/, '');
     const formats = new Set([
-        phone,
-        phone.startsWith('+') ? phone.slice(1) : '+' + phone,
-        phone.replace(/^\+?51/, ''),
-        '+51' + phone.replace(/^\+?51/, '')
+        cleanPhone,
+        cleanPhone.startsWith('+') ? cleanPhone.slice(1) : '+' + cleanPhone,
+        base,
+        '+51' + base,
+        '51' + base,
+        'whatsapp:' + cleanPhone,
+        'whatsapp:+' + base,
+        'whatsapp:51' + base,
+        'whatsapp:' + base
     ]);
     for (const fmt of formats) {
         const snap = await db.collection('members').where('phone', '==', fmt).limit(1).get();
@@ -210,37 +217,67 @@ export async function executeTool(name: string, args: any) {
 
         case 'get_student_routine':
             try {
-                const routineSnap = await dbInner.collection('studentRoutineAssignments')
-                    .where('studentPhone', '==', args.phone)
-                    .where('status', '==', 'active')
-                    .limit(1)
-                    .get();
+                const searchRoutines = async (db: any, phone: string) => {
+                    const snap = await db.collection('studentRoutineAssignments')
+                        .where('studentPhone', '==', phone)
+                        .get(); // Retirado el filtro de active para probar si es un problema de datos
 
-                if (routineSnap.empty) {
+                    let routines = snap.docs.map((doc: any) => ({
+                        title: doc.data().routineTitle,
+                        url: doc.data().routineUrl,
+                        createdAt: doc.data().createdAt,
+                        status: doc.data().status
+                    }));
+
+                    // Solo devolver aquellas que tengan url
+                    routines = routines.filter((r: any) => r.url);
+
+                    // Ordenar por fecha descendente en memoria para evitar requisito de índice compuesto
+                    return routines.sort((a: any, b: any) => {
+                        const dateA = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(a.createdAt || 0);
+                        const dateB = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.createdAt || 0);
+                        return dateB.getTime() - dateA.getTime();
+                    });
+                };
+
+                const cleanPhone = args.phone.replace(/\s/g, '');
+                let routines = await searchRoutines(dbInner, cleanPhone);
+
+                if (routines.length === 0) {
                     // Probar formatos alternativos de teléfono
+                    const base = cleanPhone.replace(/^\+?51/, '');
                     const formats = new Set([
-                        args.phone,
-                        args.phone.startsWith('+') ? args.phone.slice(1) : '+' + args.phone,
-                        args.phone.replace(/^\+?51/, ''),
-                        '+51' + args.phone.replace(/^\+?51/, '')
+                        cleanPhone,
+                        cleanPhone.startsWith('+') ? cleanPhone.slice(1) : '+' + cleanPhone,
+                        base,
+                        '+51' + base,
+                        '51' + base,
+                        'whatsapp:' + cleanPhone,
+                        'whatsapp:+' + base,
+                        'whatsapp:51' + base,
+                        'whatsapp:' + base
                     ]);
-                    let found: any = null;
                     for (const fmt of formats) {
-                        const s = await dbInner.collection('studentRoutineAssignments')
-                            .where('studentPhone', '==', fmt)
-                            .where('status', '==', 'active')
-                            .limit(1)
-                            .get();
-                        if (!s.empty) { found = s; break; }
+                        const altRoutines = await searchRoutines(dbInner, fmt);
+                        if (altRoutines.length > 0) {
+                            routines = altRoutines;
+                            break;
+                        }
                     }
-                    if (!found) return { found: false, message: 'No tienes una rutina asignada aún.' };
-                    const r = found.docs[0].data();
-                    return { found: true, title: r.routineTitle, url: r.routineUrl };
                 }
 
-                const r = routineSnap.docs[0].data();
-                return { found: true, title: r.routineTitle, url: r.routineUrl };
+                if (routines.length === 0) {
+                    return { found: false, message: 'No tienes una rutina asignada aún.' };
+                }
+
+                return {
+                    found: true,
+                    count: routines.length,
+                    routines: routines,
+                    message: `Se encontraron ${routines.length} rutinas activas.`
+                };
             } catch (e: any) {
+                console.error("❌ Error en get_student_routine:", e);
                 return { error: e.message };
             }
 
@@ -285,7 +322,7 @@ export async function processMessage(db: any, phone: string, messageText: string
                 parameters: {
                     type: "object",
                     properties: {
-                        phone: { type: "string", description: "Member's phone number" },
+                        phone: { type: "string", description: "Phone number of the member" },
                         classId: { type: "string", description: "ID of the class to book" },
                         date: { type: "string", description: "Date of the class" }
                     },
@@ -297,11 +334,11 @@ export async function processMessage(db: any, phone: string, messageText: string
             type: "function",
             function: {
                 name: "generate_payment_link",
-                description: "Generate a payment link (Culqi) for a specific plan. Call this immediately when the user wants to pay or renew. If the customer is registered, their data is already available — do NOT ask the user for it.",
+                description: "Generate a payment link (Culqi) for a specific plan. If the customer is registered, their data is already available — do NOT ask the user for it.",
                 parameters: {
                     type: "object",
                     properties: {
-                        phone: { type: "string", description: "User's phone number" },
+                        phone: { type: "string", description: "Customer's phone number exactly as provided in the context." },
                         planName: { type: "string", description: "Name of the plan (e.g. '1 mes', '2 meses', '3 meses')" },
                         customerName: { type: "string", description: "User's full name (optional if already registered)" },
                         dni: { type: "string", description: "User's DNI (optional if already registered)" },
@@ -319,7 +356,7 @@ export async function processMessage(db: any, phone: string, messageText: string
                 parameters: {
                     type: "object",
                     properties: {
-                        phone: { type: "string", description: "User phone number" },
+                        phone: { type: "string", description: "Customer's phone number exactly as provided in the context." },
                         name: { type: "string", description: "User's full name" },
                         dni: { type: "string" },
                         email: { type: "string" }
@@ -332,11 +369,11 @@ export async function processMessage(db: any, phone: string, messageText: string
             type: "function",
             function: {
                 name: "get_student_routine",
-                description: "Obtener la rutina de entrenamiento asignada al cliente. Úsalo cuando el cliente pida su rutina, ejercicios, o plan de entrenamiento.",
+                description: "Obtener las rutinas de entrenamiento asignadas al cliente. Úsalo cuando el cliente pida su rutina, ejercicios, o plan de entrenamiento. Puede devolver una o varias rutinas activas.",
                 parameters: {
                     type: "object",
                     properties: {
-                        phone: { type: "string", description: "Teléfono del cliente" }
+                        phone: { type: "string", description: "El número de teléfono del usuario para buscar su rutina. USA SIEMPRE el que recibes en el contexto." },
                     },
                     required: ["phone"]
                 }
@@ -350,7 +387,7 @@ export async function processMessage(db: any, phone: string, messageText: string
                 parameters: {
                     type: "object",
                     properties: {
-                        phone: { type: "string" }
+                        phone: { type: "string", description: "El número de teléfono del usuario." }
                     },
                     required: ["phone"]
                 }
@@ -364,7 +401,7 @@ export async function processMessage(db: any, phone: string, messageText: string
                 parameters: {
                     type: "object",
                     properties: {
-                        phone: { type: "string" },
+                        phone: { type: "string", description: "El número de teléfono del usuario." },
                         fields: {
                             type: "object",
                             description: "Campos a guardar. Puede incluir: objetivo, nivel, diasSemana, limitaciones",
@@ -388,7 +425,21 @@ export async function processMessage(db: any, phone: string, messageText: string
                 parameters: {
                     type: "object",
                     properties: {
-                        phone: { type: "string", description: "Teléfono del cliente" }
+                        phone: { type: "string", description: "El número de teléfono del usuario." }
+                    },
+                    required: ["phone"]
+                }
+            }
+        },
+        {
+            type: "function",
+            function: {
+                name: "check_member_status",
+                description: "Consultar el estado de la membresía del cliente: fecha de inicio, vencimiento, plan actual y si está activo. Úsalo SOLO cuando el cliente pregunte específicamente por su estado o vencimiento.",
+                parameters: {
+                    type: "object",
+                    properties: {
+                        phone: { type: "string", description: "El número de teléfono del usuario." }
                     },
                     required: ["phone"]
                 }
@@ -398,16 +449,17 @@ export async function processMessage(db: any, phone: string, messageText: string
 
     const memberDoc = await findMember(db, phone);
     let customerContext = "Prospecto o cliente no registrado.";
-    let clientFirstName = '';
-
-    let memberStatus = 'unknown';
-    let daysUntilExpiry = null;
     let profileQuestion: string | null = null;
+    let daysUntilExpiry: number | null = null;
+    let clientFirstName = '';
 
     if (memberDoc && !memberDoc.empty) {
         const data = memberDoc.docs[0].data();
         clientFirstName = (data.name || '').split(' ')[0];
-        memberStatus = data.status || 'prospect';
+
+        // Perfil de entrenamiento
+        const profile = data.trainingProfile || {};
+        const profileStep = data.profileStep || 0;
 
         // Calcular días hasta vencimiento
         if (data.endDate) {
@@ -417,21 +469,18 @@ export async function processMessage(db: any, phone: string, messageText: string
             daysUntilExpiry = Math.ceil((end.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
         }
 
-        // Perfil de entrenamiento
-        const profile = data.trainingProfile || {};
-        const profileStep = data.profileStep || 0;
         const profileStr = profile.objetivo
             ? `Objetivo: ${profile.objetivo}. Nivel: ${profile.nivel || 'N/A'}. Días/semana: ${profile.diasSemana || 'N/A'}. Limitaciones: ${profile.limitaciones || 'ninguna'}. Notas trainer: ${profile.notasTrainer || 'N/A'}.`
             : 'Sin perfil de entrenamiento aún.';
 
         // Determinar qué pregunta de perfil hacer (solo miembros activos)
-        if (memberStatus === 'active' && profileStep < 3) {
-            if (!profile.objetivo) profileQuestion = `Por cierto ${clientFirstName}, ¿cuál es tu objetivo principal en el gym? (bajar de peso, ganar músculo, tonificar...) 💪`;
-            else if (!profile.nivel) profileQuestion = `¿Te consideras principiante, intermedio o avanzado en el entrenamiento?`;
-            else if (!profile.diasSemana) profileQuestion = `¿Cuántos días a la semana puedes venir a entrenar?`;
+        if (data.status === 'active' && profileStep < 3) {
+            if (!profile.objetivo) profileQuestion = `Por cierto${clientFirstName ? ` ${clientFirstName}` : ''}, ¿cuál es tu objetivo principal en el gym? (bajar de peso, ganar músculo, tonificar...) Eso me ayudará a darte recomendaciones más precisas. 😉`;
+            else if (!profile.nivel) profileQuestion = `¿Te consideras principiante, intermedio o avanzado en el entrenamiento? 💪`;
+            else if (!profile.diasSemana) profileQuestion = `¿Cuántos días a la semana puedes venir a entrenar para armar algo realista? 🔥`;
         }
 
-        customerContext = `CLIENTE REGISTRADO: Nombre: ${data.name || 'N/A'}. DNI: ${data.dni || 'N/A'}. Email: ${data.email || 'N/A'}. Plan: ${data.plan || 'sin plan'}. Estado: ${memberStatus}. Vence: ${data.endDate || 'N/A'}. Días hasta vencimiento: ${daysUntilExpiry !== null ? daysUntilExpiry : 'N/A'}. Perfil: ${profileStr}`;
+        customerContext = `CLIENTE REGISTRADO: Nombre: ${data.name || 'N/A'}. DNI: ${data.dni || 'N/A'}. Email: ${data.email || 'N/A'}. Plan: ${data.plan || 'sin plan'}. Estado: ${data.status || 'prospect'}. Vence: ${data.endDate || 'N/A'}. Perfil Entrenamiento: ${profileStr}`;
     }
 
     const historySnapshot = await db.collection('messages')
@@ -447,27 +496,45 @@ export async function processMessage(db: any, phone: string, messageText: string
 
     messages.push({ role: 'user', content: messageText });
 
-    const greetingName = clientFirstName ? ` ${clientFirstName}` : '';
     const profileQuestionInstruction = profileQuestion
         ? `\n    PREGUNTA DE PERFIL PENDIENTE: Al final de tu respuesta (después de responder lo que el cliente pidió), añade esta pregunta de forma natural: "${profileQuestion}". Si el cliente responde, guarda con update_member_profile.`
         : '';
 
-    const systemPrompt = `Eres Sofía, asistente personal y trainer virtual de MegaGym. Eres cercana, motivadora y hablas como amiga — no como robot. Usas el nombre del cliente siempre que puedas.
-    Teléfono del cliente: ${phone}. Contexto: ${customerContext}
+    const now = new Date();
+    const currentDay = now.toLocaleDateString('es-PE', { weekday: 'long' });
+    const currentTime = now.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', hour12: false });
 
-    PERSONALIDAD: Eres el trainer personal del cliente. Si tienes su perfil (objetivo, nivel), úsalo para dar consejos específicos. Si pregunta sobre ejercicios, nutrición o entrenamiento, responde como un trainer real con conocimiento — no solo como recepcionista.
+    const systemPrompt = `Eres Sofía, la asistente personal y trainer virtual de MegaGym ("La casa del dolor" 📍). Eres cercana, motivadora y hablas como una amiga experta en fitness. 
 
-    REGLAS DE SALUDO (aplica cuando el cliente diga Hola, Buenos días, etc.):
-    - Si estado es "active" y días hasta vencimiento <= 7: "¡Hola${greetingName}! 😊 Te aviso que tu membresía vence el ${memberDoc && !memberDoc.empty ? memberDoc.docs[0].data().endDate : ''} (en ${daysUntilExpiry} días). ¿Quieres renovar?"
-    - Si estado es "active" y días > 7: "¡Hola${greetingName}! 😊 ¿En qué puedo ayudarte hoy?"
-    - Si estado es "overdue" o días < 0: "¡Hola${greetingName}! Tu membresía venció el ${memberDoc && !memberDoc.empty ? memberDoc.docs[0].data().endDate : ''}. ¿Te ayudo a renovar? 💪"
-    - Si es prospecto o no registrado: saluda normal y ofrece planes (1 mes S/80, 2 meses S/120, 3 meses S/150).
+    INFORMACIÓN CRÍTICA DEL GIMNASIO (Tu Biblia):
+    - Dirección: Mz I Lt 5 Montenegro, San Juan de Lurigancho.
+    - Horarios de Atención:
+        * Lunes a Viernes: 6:00 AM - 10:00 PM
+        * Sábados: 6:00 AM - 6:00 PM
+        * Domingos: 6:00 AM - 12:00 PM (Mediodía)
+        * Feriados: Consultar disponibilidad.
+    - Precios de Membresía (Sin costo de matrícula):
+        * 1 Mes: S/ 80
+        * 2 Meses: S/ 120 (Se puede pagar en 2 partes)
+        * 3 Meses: S/ 150 (Se puede pagar en 2 partes)
+        * Clase diaria: S/ 6
+    - Clases Grupales (Aeróbicos/Localizado): Lunes a Sábado a las 8:00 AM y 8:00 PM.
+    - Métodos de Pago: Yape, Plin, Efectivo, Tarjeta de Crédito/Débito (vía link Culqi).
 
-    REGLA CRÍTICA: Si el cliente está REGISTRADO, YA TIENES su nombre, DNI y email en el contexto. NO los pidas. Úsalos directamente para generar el link de pago.
-    REGLA RUTINA: Si el cliente pide su rutina o ejercicios, usa get_student_routine y envíale el link.
-    REGLA HISTORIAL: Si el cliente pregunta sobre sus pagos o historial, usa get_payment_history.
-    REGLA PERFIL: Si el cliente responde preguntas sobre su objetivo, nivel o días disponibles, guarda con update_member_profile inmediatamente.
-    REGLA: Si un tool devuelve éxito, CONFÍRMALO y no digas que hay fallos.${profileQuestionInstruction}`;
+    CONTEXTO ACTUAL:
+    - Fecha/Hora actual: ${currentDay}, ${currentTime}.
+    - Teléfono del cliente: ${phone}. 
+    - Info del cliente: ${customerContext}
+
+    TU MISIÓN:
+    1. Si te preguntan "¿Está abierto?" o sobre el horario, usa la hora actual (${currentTime}) y el día (${currentDay}) para responder con precisión.
+    2. REGLAS DE SALUDO (Solo si el cliente inicia la charla con un saludo):
+        - Miembro ACTIVO con vencimiento en <= 7 días: Saluda y avisa: "Tu membresía vence el ${memberDoc && !memberDoc.empty ? memberDoc.docs[0].data().endDate : ''} (en ${daysUntilExpiry} días). ¿Te ayudo a renovar?"
+        - Miembro VENCIDO: "Tu membresía venció el ${memberDoc && !memberDoc.empty ? memberDoc.docs[0].data().endDate : ''}. ¡Te esperamos de vuelta para seguir dándole duro! 💪"
+    3. Si el cliente está REGISTRADO, usa su nombre (${clientFirstName}) y NO le pidas datos que ya tienes (DNI, email).
+    4. Si pide su rutina, usa 'get_student_routine'.
+    5. Si responde a tus preguntas de perfil (objetivo, nivel, etc.), usa 'update_member_profile' inmediatamente.
+    6. Mensajes CORTOS (máx 3 oraciones), usa emojis (💪, 😊, 🔥) y termina con una pregunta motivadora.${profileQuestionInstruction}`;
 
     const response = await openai.chat.completions.create({
         model: 'gpt-4o',
@@ -492,7 +559,7 @@ export async function processMessage(db: any, phone: string, messageText: string
         const secondResponse = await openai.chat.completions.create({
             model: 'gpt-4o',
             messages: [
-                { role: 'system', content: systemPrompt + "\nIMPORTANT: TRUST tool success results." },
+                { role: 'system', content: systemPrompt },
                 ...toolMessages
             ]
         });

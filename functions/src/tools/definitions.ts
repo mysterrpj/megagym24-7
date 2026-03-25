@@ -1,4 +1,3 @@
-import * as admin from 'firebase-admin';
 
 
 
@@ -73,16 +72,18 @@ export const tools = [
 
 // Implementation of tool execution
 export async function executeTool(name: string, args: any) {
+    const admin = require('firebase-admin');
+    if (!admin.apps.length) admin.initializeApp();
     const db = admin.firestore(); // Initialize lazily
     switch (name) {
         case 'get_membership_plans':
             const snapshot = await db.collection('memberships').get();
-            return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            return snapshot.docs.map((doc: any) => ({ id: doc.id, ...doc.data() }));
 
         case 'get_available_classes':
             // Logic to fetch classes
             const classesSnap = await db.collection('classes').get();
-            return classesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            return classesSnap.docs.map((doc: any) => ({ id: doc.id, ...doc.data() }));
 
         case 'check_member_status':
             const membersSnap = await db.collection('members').where('phone', '==', args.phone).get();
