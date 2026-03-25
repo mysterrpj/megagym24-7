@@ -20,13 +20,64 @@ El proyecto es un sistema para la gestión de un gimnasio ("MegaGym") con un bot
     *   Maneja la lógica de recepción de mensajes.
     *   **Audios**: Aquí se detectan los mensajes de voz (MediaUrl0 con audio/*), se descargan y se envían a transcribir con Whisper antes de pasarlos al procesador de mensajes.
     *   Contiene los webhooks de Culqi (`culqiWebhook`, `createCulqiCharge`).
+    *   Todas las funciones tienen `.runWith({ memory: '512MB' o '1GB' })` para evitar timeouts de deploy.
 2.  `functions/src/bot/transcription.ts`:
     *   Usa la API de Whisper (`openai.audio.transcriptions.create`) para convertir notas de voz de WhatsApp a texto.
 3.  `functions/src/bot/messageProcessor.ts`:
     *   **Es el "Cerebro" del bot (Sofía).**
     *   Contiene la función `processMessage` que inyecta la hora actual, el contexto del cliente (sacado de Firestore) y define la personalidad y reglas de la IA.
-    *   Define las herramientas (tools/functions) que el LLM puede ejecutar (ej. `get_student_routine`, `generate_payment_link`).
+    *   Define las herramientas (tools/functions) que el LLM puede ejecutar.
     *   Contiene la función `executeTool` que ejecuta localmente la lógica en la base de datos cuando el LLM decide usar una herramienta.
+
+## Herramientas (Tools) disponibles en el Bot
+
+| Tool | Descripción |
+|---|---|
+| `get_student_routine` | Obtiene las rutinas de entrenamiento asignadas al cliente desde Firestore. |
+| `get_student_diet` | Obtiene la dieta personalizada asignada al cliente desde el campo `diet` en Firestore. |
+| `generate_payment_link` | Genera un link de pago Culqi para una membresía específica. |
+| `send_payment_voucher` | Genera y envía el comprobante de pago como imagen. |
+| `update_member_profile` | Guarda el perfil de entrenamiento del cliente (objetivo, nivel, días/semana, limitaciones). |
+| `get_payment_history` | Obtiene el historial de pagos del cliente. |
+| `check_member_status` | Consulta el estado de la membresía del cliente (solo si él lo pide). |
+
+## Sistema de Dietas
+
+*   **Flujo Manual Híbrido**: El administrador genera la dieta en su herramienta externa (ChatGPT "PhD Coach") y la pega en el perfil del cliente desde el Dashboard.
+*   **Dónde editar**: En el Dashboard → Sección "Miembros" → Botón "Editar" del cliente → Campo **"Dieta Actual (Para Bot)"**.
+*   **Dónde se guarda**: En el documento del miembro en Firestore, campo `diet` (string).
+*   **Entrega Nivel 3**: Sofía identifica el día actual y lo mapea a un grupo del plan semanal:
+    *   Lun/Mar/Mié → Días 1-3
+    *   Jue/Vie → Días 4-5
+    *   Sáb/Dom → Días 6-7
+    Sofía menciona la fase del día y pregunta qué comida quiere revisar el cliente. Nunca entrega toda la dieta de golpe.
+
+## Comportamiento del Bot al Saludar
+
+*   **Primer contacto** (nunca ha hablado con el bot): Sofía se presenta de forma cálida, menciona sus capacidades y no habla de pagos ni vencimientos.
+*   **Cliente activo con vencimiento ≤ 3 días**: Sofía saluda y avisa sobre el próximo vencimiento con link de renovación.
+*   **Cliente vencido**: Sofía lo notifica y lo invita a renovar.
+*   **Cliente activo con > 3 días**: Sofía saluda normalmente sin mencionar fechas de vencimiento.
+
+## Esquema de Firestore - Colección `members`
+
+| Campo | Tipo | Descripción |
+|---|---|---|
+| `name` | string | Nombre completo |
+| `phone` | string | Teléfono (formato +51XXXXXXXXX) |
+| `email` | string | Email |
+| `dni` | string | DNI |
+| `plan` | string | Nombre del plan (ej. "Membresía Fit 2026") |
+| `status` | string | `active`, `pending`, `overdue`, `prospect` |
+| `startDate` | string | Fecha de inicio (YYYY-MM-DD) |
+| `endDate` | string | Fecha de fin (YYYY-MM-DD) |
+| `expirationDate` | Timestamp | Fecha de vencimiento (Firestore Timestamp) |
+| `planPrice` | number | Precio del plan |
+| `amountPaid` | number | Total pagado |
+| `debt` | number | Deuda pendiente |
+| `diet` | string | Dieta asignada por el administrador (texto libre) |
+| `trainingProfile` | object | Perfil de entrenamiento: `{objetivo, nivel, diasSemana, limitaciones, notasTrainer}` |
+| `payments` | array | Historial de pagos |
 
 ## Reglas Estrictas para Modificar el Prompt (`messageProcessor.ts`)
 
@@ -47,3 +98,4 @@ El proyecto es un sistema para la gestión de un gimnasio ("MegaGym") con un bot
 ---
 
 *Nota para el Asistente AI: Si estás leyendo esto al iniciar un nuevo chat, confírmale al usuario que has asimilado el contexto del proyecto y estás listo para ayudar sin romper la lógica actual.*
+
