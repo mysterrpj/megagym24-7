@@ -2,11 +2,11 @@ import { useState, useRef, useEffect } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Search, UserPlus, Mail, Phone, MoreHorizontal, ChevronLeft, ChevronRight, X, CreditCard, Edit, Trash, Loader2, Banknote } from 'lucide-react';
+import { Search, UserPlus, Mail, Phone, MoreHorizontal, ChevronLeft, ChevronRight, X, CreditCard, Edit, Trash, Loader2, Banknote, Dumbbell, ExternalLink, ToggleLeft, ToggleRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { httpsCallable } from 'firebase/functions';
 import { functions, db } from '@/lib/firebase';
-import { collection, onSnapshot, query, orderBy, addDoc, updateDoc, doc, deleteDoc, serverTimestamp, arrayUnion } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, where, addDoc, updateDoc, doc, deleteDoc, getDocs, serverTimestamp, arrayUnion } from 'firebase/firestore';
 
 // Type definitions
 interface Member {
@@ -756,12 +756,216 @@ function CashPaymentModal({
 }
 
 // Actions Menu Component
+// Routine Assignment type
+interface RoutineAssignment {
+    id: string;
+    routineTitle: string;
+    routineUrl: string;
+    shareId: string;
+    status: 'active' | 'inactive';
+    createdAt: any;
+}
+
+// Routines Modal Component
+function RoutinesModal({ member, onClose }: { member: Member; onClose: () => void }) {
+    const [routines, setRoutines] = useState<RoutineAssignment[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [updating, setUpdating] = useState<string | null>(null);
+
+    useEffect(() => {
+        const fetchRoutines = async () => {
+            setLoading(true);
+            try {
+                const promises: Promise<any>[] = [];
+
+                // Query by studentId (Firestore doc ID) — no orderBy to avoid composite index requirement
+                promises.push(getDocs(query(
+                    collection(db, 'studentRoutineAssignments'),
+                    where('studentId', '==', member.id)
+                )));
+
+                // Query by phone (fallback: rutinas app may have used a different collection)
+                if (member.phone) {
+                    promises.push(getDocs(query(
+                        collection(db, 'studentRoutineAssignments'),
+                        where('studentPhone', '==', member.phone)
+                    )));
+                }
+
+                const snaps = await Promise.all(promises);
+
+                // Merge results deduplicating by doc id
+                const seen = new Set<string>();
+                const rows: RoutineAssignment[] = [];
+                for (const snap of snaps) {
+                    for (const d of snap.docs) {
+                        if (seen.has(d.id)) continue;
+                        seen.add(d.id);
+                        rows.push({
+                            id: d.id,
+                            routineTitle: d.data().routineTitle ?? 'Sin título',
+                            routineUrl: d.data().routineUrl ?? '',
+                            shareId: d.data().shareId ?? '',
+                            status: d.data().status ?? 'active',
+                            createdAt: d.data().createdAt,
+                        });
+                    }
+                }
+
+                // Sort by createdAt desc
+                rows.sort((a, b) => {
+                    const ta = a.createdAt?.toDate?.()?.getTime() ?? 0;
+                    const tb = b.createdAt?.toDate?.()?.getTime() ?? 0;
+                    return tb - ta;
+                });
+
+                setRoutines(rows);
+            } catch (e) {
+                console.error('Error cargando rutinas:', e);
+            } finally {
+                setLoading(false);
+            }
+        };
+        void fetchRoutines();
+    }, [member.id]);
+
+    const toggleStatus = async (routine: RoutineAssignment) => {
+        const newStatus = routine.status === 'active' ? 'inactive' : 'active';
+        setUpdating(routine.id);
+        try {
+            await updateDoc(doc(db, 'studentRoutineAssignments', routine.id), { status: newStatus });
+            setRoutines(prev => prev.map(r => r.id === routine.id ? { ...r, status: newStatus } : r));
+        } finally {
+            setUpdating(null);
+        }
+    };
+
+    const deleteRoutine = async (routine: RoutineAssignment) => {
+        if (!confirm(`¿Eliminar la rutina "${routine.routineTitle}"?`)) return;
+        setUpdating(routine.id);
+        try {
+            await deleteDoc(doc(db, 'studentRoutineAssignments', routine.id));
+            setRoutines(prev => prev.filter(r => r.id !== routine.id));
+        } finally {
+            setUpdating(null);
+        }
+    };
+
+    const activeCount = routines.filter(r => r.status === 'active').length;
+
+    return (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+            <div className="bg-neutral-900 border border-neutral-800 rounded-xl w-full max-w-lg shadow-2xl">
+                {/* Header */}
+                <div className="flex items-center justify-between p-5 border-b border-neutral-800">
+                    <div>
+                        <h2 className="text-white font-bold text-lg flex items-center gap-2">
+                            <Dumbbell className="w-5 h-5 text-yellow-400" />
+                            Rutinas de {member.name}
+                        </h2>
+                        <p className="text-gray-500 text-xs mt-0.5">
+                            {activeCount} activa{activeCount !== 1 ? 's' : ''} · {routines.length} total
+                        </p>
+                    </div>
+                    <button onClick={onClose} className="text-gray-500 hover:text-white transition-colors">
+                        <X className="w-5 h-5" />
+                    </button>
+                </div>
+
+                {/* Content */}
+                <div className="p-5 max-h-[60vh] overflow-y-auto space-y-3">
+                    {loading ? (
+                        <div className="flex items-center justify-center py-10">
+                            <Loader2 className="w-6 h-6 animate-spin text-yellow-400" />
+                        </div>
+                    ) : routines.length === 0 ? (
+                        <p className="text-center text-gray-500 py-10 text-sm">
+                            Este alumno no tiene rutinas asignadas aún.
+                        </p>
+                    ) : (
+                        routines.map(routine => (
+                            <div
+                                key={routine.id}
+                                className={cn(
+                                    "rounded-lg border p-4 flex items-start justify-between gap-3 transition-opacity",
+                                    routine.status === 'active'
+                                        ? "border-yellow-500/30 bg-yellow-500/5"
+                                        : "border-neutral-700 bg-neutral-800/50 opacity-60"
+                                )}
+                            >
+                                <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2 mb-1">
+                                        <span className={cn(
+                                            "text-xs font-bold px-2 py-0.5 rounded-full",
+                                            routine.status === 'active'
+                                                ? "bg-green-500/20 text-green-400"
+                                                : "bg-neutral-700 text-gray-500"
+                                        )}>
+                                            {routine.status === 'active' ? 'Activa' : 'Inactiva'}
+                                        </span>
+                                        <span className="text-gray-500 text-xs">
+                                            {routine.createdAt?.toDate
+                                                ? routine.createdAt.toDate().toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' })
+                                                : 'Reciente'}
+                                        </span>
+                                    </div>
+                                    <p className="text-white text-sm font-medium truncate">{routine.routineTitle}</p>
+                                    {routine.routineUrl && (
+                                        <a
+                                            href={routine.routineUrl}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="text-blue-400 hover:text-blue-300 text-xs flex items-center gap-1 mt-1 truncate"
+                                        >
+                                            <ExternalLink className="w-3 h-3 shrink-0" />
+                                            Ver rutina
+                                        </a>
+                                    )}
+                                </div>
+                                <div className="flex items-center gap-1 shrink-0">
+                                    <button
+                                        onClick={() => toggleStatus(routine)}
+                                        disabled={updating === routine.id}
+                                        title={routine.status === 'active' ? 'Desactivar' : 'Activar'}
+                                        className="p-1.5 rounded-md hover:bg-neutral-700 transition-colors"
+                                    >
+                                        {updating === routine.id
+                                            ? <Loader2 className="w-4 h-4 animate-spin text-gray-400" />
+                                            : routine.status === 'active'
+                                                ? <ToggleRight className="w-5 h-5 text-green-400" />
+                                                : <ToggleLeft className="w-5 h-5 text-gray-500" />
+                                        }
+                                    </button>
+                                    <button
+                                        onClick={() => deleteRoutine(routine)}
+                                        disabled={updating === routine.id}
+                                        title="Eliminar"
+                                        className="p-1.5 rounded-md hover:bg-neutral-700 transition-colors text-red-500 hover:text-red-400"
+                                    >
+                                        <Trash className="w-4 h-4" />
+                                    </button>
+                                </div>
+                            </div>
+                        ))
+                    )}
+                </div>
+
+                <div className="p-4 border-t border-neutral-800">
+                    <p className="text-gray-500 text-xs">
+                        Solo las rutinas <span className="text-green-400 font-medium">activas</span> son entregadas por Sofía al alumno.
+                    </p>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 function MemberActionsMenu({
     member,
     onAction
 }: {
     member: Member;
-    onAction: (action: 'payment' | 'cashPayment' | 'edit' | 'delete', member: Member) => void
+    onAction: (action: 'payment' | 'cashPayment' | 'edit' | 'delete' | 'routines', member: Member) => void
 }) {
     const [isOpen, setIsOpen] = useState(false);
     const menuRef = useRef<HTMLDivElement>(null);
@@ -778,7 +982,7 @@ function MemberActionsMenu({
         };
     }, []);
 
-    const handleClick = (action: 'payment' | 'cashPayment' | 'edit' | 'delete') => {
+    const handleClick = (action: 'payment' | 'cashPayment' | 'edit' | 'delete' | 'routines') => {
         onAction(action, member);
         setIsOpen(false);
     };
@@ -794,6 +998,13 @@ function MemberActionsMenu({
 
             {isOpen && (
                 <div className="absolute right-0 z-10 mt-1 w-52 rounded-lg bg-neutral-900 border border-neutral-800 shadow-lg py-1">
+                    <button
+                        onClick={() => handleClick('routines')}
+                        className="w-full text-left px-3 py-2 text-sm text-yellow-400 hover:bg-neutral-800 flex items-center gap-2"
+                    >
+                        <Dumbbell className="w-4 h-4" />
+                        Ver Rutinas
+                    </button>
                     <button
                         onClick={() => handleClick('cashPayment')}
                         className="w-full text-left px-3 py-2 text-sm text-yellow-400 hover:bg-neutral-800 flex items-center gap-2"
@@ -839,6 +1050,7 @@ export function MembersPage() {
     const [selectedMember, setSelectedMember] = useState<Member | undefined>(undefined);
     const [showPaymentModal, setShowPaymentModal] = useState(false);
     const [showCashPaymentModal, setShowCashPaymentModal] = useState(false);
+    const [showRoutinesModal, setShowRoutinesModal] = useState(false);
 
     // Real-time Firestore Subscription
     useEffect(() => {
@@ -901,8 +1113,11 @@ export function MembersPage() {
     }, []);
 
     // Handlers
-    const handleAction = (action: 'payment' | 'cashPayment' | 'edit' | 'delete', member: Member) => {
-        if (action === 'payment') {
+    const handleAction = (action: 'payment' | 'cashPayment' | 'edit' | 'delete' | 'routines', member: Member) => {
+        if (action === 'routines') {
+            setSelectedMember(member);
+            setShowRoutinesModal(true);
+        } else if (action === 'payment') {
             setSelectedMember(member);
             setShowPaymentModal(true);
         } else if (action === 'cashPayment') {
@@ -1249,6 +1464,14 @@ export function MembersPage() {
                     member={selectedMember}
                     onClose={() => { setShowCashPaymentModal(false); setSelectedMember(undefined); }}
                     onSubmit={handleCashPayment}
+                />
+            )}
+
+            {/* Routines Modal */}
+            {showRoutinesModal && selectedMember && (
+                <RoutinesModal
+                    member={selectedMember}
+                    onClose={() => { setShowRoutinesModal(false); setSelectedMember(undefined); }}
                 />
             )}
         </div>
