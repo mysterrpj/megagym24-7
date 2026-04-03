@@ -130,9 +130,9 @@ export async function executeTool(name: string, args: any) {
 
                 // Usar el monto del último pago, no el acumulado
                 const lastPayment = member.payments?.[member.payments.length - 1];
-                const amountPaid = Number(lastPayment?.amount) || Number(member.planPrice) || Number(member.amountPaid) || 0;
                 const planPrice = Number(member.planPrice) || 0;
-                const debt = Math.max(0, planPrice - amountPaid);
+                const debt = member.debt !== undefined ? Math.max(0, Number(member.debt)) : Math.max(0, planPrice - (Number(lastPayment?.amount) || 0));
+                const amountPaid = Math.max(0, planPrice - debt);
                 const lastMethod = lastPayment?.method || (member.culqiOrderId ? 'Culqi' : 'Efectivo');
 
                 // Resolver fecha de inicio
