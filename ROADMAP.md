@@ -1,3 +1,8 @@
+> [!NOTE]
+> **DOCUMENTO ARCHIVADO Y COMPLETADO** — Roadmap histórico del proyecto. Todas las fases están completadas (Stripe fue reemplazado por Culqi, el bot está en producción). La fuente de verdad actual es `CONTEXTO_PROYECTO.md`.
+
+---
+
 # 🗺️ Roadmap del Proyecto - Fit IA
 
 Este documento detalla los pasos restantes para llevar el sistema de local a producción.

@@ -95,6 +95,31 @@ El proyecto es un sistema para la gestión de un gimnasio ("MegaGym") con un bot
 *   **Horarios**: Lunes a Viernes (6am-10pm), Sábados (6am-6pm), Domingos (6am-12pm).
 *   **Precios**: 1 Mes (S/80), 2 Meses (S/120), 3 Meses (S/150). Clase suelta (S/6).
 
+## Regla Crítica: Cálculo de Deuda en el Voucher (`send_payment_voucher`)
+
+> [!WARNING]
+> Este bug ya fue corregido. No revertir este comportamiento.
+
+**El problema:** El bot calculaba la deuda restando `planPrice - lastPayment.amount` (el último pago individual del array `payments`). Esto causaba que clientes con pagos en cuotas vieran un saldo pendiente incorrecto aunque ya hubieran pagado todo. Ejemplo: cliente paga S/50 primero y S/100 después → el bot mostraba "debe S/100" porque solo leía el primer registro del array.
+
+**La solución aplicada (2026-04-02):** El tool `send_payment_voucher` en `messageProcessor.ts` ahora lee el campo `debt` directamente desde Firestore (`member.debt`) en lugar de recalcularlo. El campo `debt` es la fuente de verdad para la deuda real del cliente.
+
+**Lógica actual:**
+```typescript
+const debt = member.debt !== undefined ? Math.max(0, Number(member.debt)) : Math.max(0, planPrice - (Number(lastPayment?.amount) || 0));
+const amountPaid = Math.max(0, planPrice - debt);
+```
+
+**Nota importante:** El campo `amountPaid` en Firestore acumula el total histórico de todos los pagos del cliente a lo largo del tiempo (renovaciones incluidas). NO usarlo para calcular lo pagado en el plan actual. Usar siempre `planPrice - debt`.
+
+## Documentos Archivados
+
+Los siguientes archivos son documentación histórica del proyecto, ya completada. No reflejan el estado actual:
+- `AGENT_STATUS.md` — Estado del sistema a enero 2026.
+- `ROADMAP.md` — Roadmap histórico (Stripe fue reemplazado por Culqi).
+- `TWILIO_PROD_PLAN.md` — Plan de migración a Twilio producción, ya ejecutado.
+- `AGENTE_PERSONALIZADO_PLAN.md` — Plan de implementación del agente Sofía, ya ejecutado.
+
 ---
 
 *Nota para el Asistente AI: Si estás leyendo esto al iniciar un nuevo chat, confírmale al usuario que has asimilado el contexto del proyecto y estás listo para ayudar sin romper la lógica actual.*

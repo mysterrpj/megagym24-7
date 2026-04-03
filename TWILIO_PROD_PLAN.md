@@ -1,3 +1,8 @@
+> [!NOTE]
+> **DOCUMENTO ARCHIVADO Y COMPLETADO** — Plan ya ejecutado. Twilio está en producción con número peruano +51 y Culqi como pasarela de pagos. La fuente de verdad actual es `CONTEXTO_PROYECTO.md`.
+
+---
+
 # Plan de Implementación: Twilio en Producción (Opción B: Tu Propio Número +51)
 
 Este documento detalla el paso a paso exacto para conectar un chip peruano nuevo a la API Oficial de WhatsApp a través de Twilio, configurar el perfil de tu gimnasio y salir del entorno "Sandbox" para poder enviar vouchers automáticamente a todos tus nuevos miembros, sin pagar alquiler de número.

@@ -1,3 +1,8 @@
+> [!NOTE]
+> **DOCUMENTO ARCHIVADO Y COMPLETADO** — Estado del sistema a enero 2026. Todo lo marcado como "pendiente" aquí ya fue implementado. La fuente de verdad actual es `CONTEXTO_PROYECTO.md`.
+
+---
+
 # 🤖 Estado del Agente - Fit IA (Gym Management System)
 
 ## 📊 Resumen General
@@ -27,10 +32,10 @@ El sistema **Fit IA** está actualmente funcional en su versión **MVP (Producto
     *   **Configuración**: Gestión de datos del gimnasio y zona de desarrollador.
 
 5.  **Backend (Cloud Functions)**:
-    *   `twilioWebhookWhatsapp`: Estrucutra lista para el Agente de IA.
+    *   `twilioWebhookWhatsapp`: Estructura lista para el Agente de IA.
     *   `sendReminders`: Tareas programadas configuradas (stubs).
 
-### 🚧 En Progreso / Pendiente de Verificación:
+### 🚧 En Progreso / Pendiente de Verificación (al momento de escritura):
 *   **Integración de Pagos Real**: La interfaz existe, pero falta conectar la pasarela de Stripe real (Claves API).
 *   **WhatsApp Bot Real**: La función existe, pero requiere configurar Twilio y OpenAI con claves reales para responder mensajes automáticamente.
 *   **Despliegue**: La app corre en local (`localhost`), falta subirla a internet (Firebase Hosting).

@@ -1,3 +1,8 @@
+> [!NOTE]
+> **DOCUMENTO ARCHIVADO Y COMPLETADO** — Plan ya ejecutado. El agente Sofía está en producción con contexto personalizado por cliente. La fuente de verdad actual es `CONTEXTO_PROYECTO.md`.
+
+---
+
 # Plan de Implementación: Agente IA Personalizado (Estilo OpenClaw) para WhatsApp
 
 Este documento contiene la arquitectura técnica y el paso a paso para transformar a `nely_bot` (o cualquier otro agente que uses) en un entrenador virtual que reconozca a cada miembro de MegaGym 24/7 y adapte sus respuestas a su plan, estado físico y edad.
