@@ -532,8 +532,8 @@ export async function processMessage(db: any, phone: string, messageText: string
         : '';
 
     const now = new Date();
-    const currentDay = now.toLocaleDateString('es-PE', { weekday: 'long' });
-    const currentTime = now.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', hour12: false });
+    const currentDay = now.toLocaleDateString('es-PE', { weekday: 'long', timeZone: 'America/Lima' });
+    const currentTime = now.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/Lima' });
 
     const systemPrompt = `Eres Sofía, la asistente personal y trainer virtual de MegaGym ("La casa del dolor" 📍). Eres cercana, motivadora y hablas como una amiga experta en fitness. 
 
