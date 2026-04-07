@@ -478,6 +478,7 @@ export async function processMessage(db: any, phone: string, messageText: string
     let customerContext = "Prospecto o cliente no registrado.";
     let profileQuestion: string | null = null;
     let daysUntilExpiry: number | null = null;
+    let daysOverdue: number | null = null;  // días transcurridos desde el vencimiento (positivo = vencido)
     let clientFirstName = '';
 
     if (memberDoc && !memberDoc.empty) {
@@ -488,27 +489,30 @@ export async function processMessage(db: any, phone: string, messageText: string
         const profile = data.trainingProfile || {};
         const profileStep = data.profileStep || 0;
 
-        // Calcular días hasta vencimiento
+        // Calcular días hasta vencimiento (negativo = ya venció)
         if (data.endDate) {
             const end = new Date(data.endDate);
             const today = new Date();
             today.setHours(0, 0, 0, 0);
             daysUntilExpiry = Math.ceil((end.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+            if (daysUntilExpiry < 0) {
+                daysOverdue = Math.abs(daysUntilExpiry); // cuántos días lleva vencido
+            }
         }
 
         const profileStr = profile.objetivo
             ? `Objetivo: ${profile.objetivo}. Nivel: ${profile.nivel || 'N/A'}. Días/semana: ${profile.diasSemana || 'N/A'}. Limitaciones: ${profile.limitaciones || 'ninguna'}. Notas trainer: ${profile.notasTrainer || 'N/A'}.`
             : 'Sin perfil de entrenamiento aún.';
 
-        // Determinar qué pregunta de perfil hacer (solo miembros activos)
-        if (data.status === 'active' && profileStep < 3) {
+        // Determinar qué pregunta de perfil hacer (solo miembros activos, no vencidos)
+        if (data.status === 'active' && profileStep < 3 && !daysOverdue) {
             if (!profile.objetivo) profileQuestion = `Por cierto${clientFirstName ? ` ${clientFirstName}` : ''}, ¿cuál es tu objetivo principal en el gym? (bajar de peso, ganar músculo, tonificar...) Eso me ayudará a darte recomendaciones más precisas. 😉`;
             else if (!profile.nivel) profileQuestion = `¿Te consideras principiante, intermedio o avanzado en el entrenamiento? 💪`;
             else if (!profile.diasSemana) profileQuestion = `¿Cuántos días a la semana puedes venir a entrenar para armar algo realista? 🔥`;
         }
 
         const hasDiet = data.diet ? 'Sí (asignada)' : 'No (sin asignar)';
-        customerContext = `CLIENTE REGISTRADO: Nombre: ${data.name || 'N/A'}. DNI: ${data.dni || 'N/A'}. Email: ${data.email || 'N/A'}. Plan: ${data.plan || 'sin plan'}. Estado: ${data.status || 'prospect'}. Vence: ${data.endDate || 'N/A'}. Dieta Asignada: ${hasDiet}. Perfil Entrenamiento: ${profileStr}`;
+        customerContext = `CLIENTE REGISTRADO: Nombre: ${data.name || 'N/A'}. DNI: ${data.dni || 'N/A'}. Email: ${data.email || 'N/A'}. Plan: ${data.plan || 'sin plan'}. Estado: ${data.status || 'prospect'}. Vence: ${data.endDate || 'N/A'}. Días vencido: ${daysOverdue !== null ? daysOverdue : 'N/A (activo)'}. Dieta Asignada: ${hasDiet}. Perfil Entrenamiento: ${profileStr}`;
     }
 
     const historySnapshot = await db.collection('messages')
@@ -533,6 +537,7 @@ export async function processMessage(db: any, phone: string, messageText: string
 
     const now = new Date();
     const currentDay = now.toLocaleDateString('es-PE', { weekday: 'long', timeZone: 'America/Lima' });
+    const currentDate = now.toLocaleDateString('es-PE', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'America/Lima' });
     const currentTime = now.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/Lima' });
 
     const systemPrompt = `Eres Sofía, la asistente personal y trainer virtual de MegaGym ("La casa del dolor" 📍). Eres cercana, motivadora y hablas como una amiga experta en fitness. 
@@ -553,7 +558,7 @@ export async function processMessage(db: any, phone: string, messageText: string
     - Métodos de Pago: Yape, Plin, Efectivo, Tarjeta de Crédito/Débito (vía link Culqi).
 
     CONTEXTO ACTUAL:
-    - Fecha/Hora actual: ${currentDay}, ${currentTime}.
+    - Fecha/Hora actual: ${currentDay} ${currentDate}, ${currentTime} (hora de Lima, Perú).
     - Teléfono del cliente: ${phone}. 
     - Info del cliente: ${customerContext}
 
@@ -562,17 +567,22 @@ export async function processMessage(db: any, phone: string, messageText: string
     2. REGLAS DE SALUDO (Solo si el cliente inicia la charla con un saludo):
         - PRIMER CONTACTO (nunca ha hablado antes con el bot): Si es el primer mensaje del cliente, IGNORA todas las alertas de vencimiento y preséntate como Sofía de forma cálida. Dile que eres su asistente personal de MegaGym y menciona brevemente qué puedes hacer (rutinas, dieta, horarios, pagos). Ejemplo: "¡Hola ${clientFirstName || ''}! 😊 Soy Sofía, tu asistente personal de MegaGym 💪 Puedo ayudarte con tu rutina, tu dieta, horarios y pagos. ¿En qué te puedo ayudar hoy?" El campo isFirstContact = ${isFirstContact}.
         - Miembro ACTIVO con vencimiento en <= 3 días: Saluda y avisa: "Tu membresía vence el ${memberDoc && !memberDoc.empty ? memberDoc.docs[0].data().endDate : ''} (en ${daysUntilExpiry} días). ¿Te ayudo a renovar?"
-        - Miembro VENCIDO: "Tu membresía venció el ${memberDoc && !memberDoc.empty ? memberDoc.docs[0].data().endDate : ''}. ¡Te esperamos de vuelta para seguir dándole duro! 💪"
+        - Miembro VENCIDO (días vencido: ${daysOverdue}): Saluda con "¡Hola ${clientFirstName}! Tu membresía venció el ${memberDoc && !memberDoc.empty ? memberDoc.docs[0].data().endDate : ''}. ¡Te esperamos de vuelta para seguir dándole duro! 💪"
     3. Si el cliente está REGISTRADO, usa su nombre (${clientFirstName}) y NO le pidas datos que ya tienes (DNI, email).
-    4. Si pide su rutina, usa 'get_student_routine'. Si pide su dieta, usa 'get_student_diet'.
-    5. Si responde a tus preguntas de perfil (objetivo, nivel, etc.), usa 'update_member_profile' inmediatamente.
-    6. ENTREGA DE DIETA (NIVEL EXPERTO): Cuando uses 'get_student_diet', NUNCA envíes todo el plan de golpe. Sigue esta lógica exacta:
+    4. COMPORTAMIENTO SEGÚN DÍAS VENCIDO (daysOverdue = ${daysOverdue}):
+       - daysOverdue es null o 0: Membresía activa. Comportamiento normal.
+       - daysOverdue entre 1 y 17: MODO ACCESO LIBRE. Responde con normalidad (rutinas, dieta, etc.) pero AL INICIO de cada respuesta agrega: "⚠️ Recuerda que tu membresía venció hace ${daysOverdue} día(s). Renueva cuando puedas para no perder el acceso.". Luego genera un link de pago con generate_payment_link y añádelo a ese recordatorio.
+       - daysOverdue entre 18 y 19: MODO AVISO URGENTE. Igual que el modo anterior, pero el recordatorio es más urgente: "🚨 ¡Atención ${clientFirstName}! Tu membresía lleva ${daysOverdue} días vencida. En ${20 - (daysOverdue ?? 0)} día(s) ya no podrás ver tus rutinas ni tu dieta. ¡Renueva ahora!". Genera el link de pago con generate_payment_link.
+       - daysOverdue >= 20: MODO ACCESO BLOQUEADO. NO uses get_student_routine ni get_student_diet. En su lugar responde: "🔒 ${clientFirstName}, tu membresía lleva ${daysOverdue} días vencida y el acceso a rutinas y dieta está suspendido. Para reactivarlo, renueva tu plan ahora 👇". Genera el link de pago con generate_payment_link. Para preguntas de horario, precios o información general, responde con normalidad.
+    5. Si pide su rutina, usa 'get_student_routine' (solo si daysOverdue < 20). Si pide su dieta, usa 'get_student_diet' (solo si daysOverdue < 20).
+    6. Si responde a tus preguntas de perfil (objetivo, nivel, etc.), usa 'update_member_profile' inmediatamente.
+    7. ENTREGA DE DIETA (NIVEL EXPERTO): Cuando uses 'get_student_diet', NUNCA envíes todo el plan de golpe. Sigue esta lógica exacta:
        a) Usa el día actual (${currentDay}) para identificar qué grupo de días del plan corresponde HOY. Regla general para planes semanales de 3 grupos: Lunes/Martes/Miércoles → Días 1-3, Jueves/Viernes → Días 4-5, Sábado/Domingo → Días 6-7.
        b) Menciona proactivamente a qué fase/grupo pertenece hoy y su nombre de la dieta (ej. "Alta Rendimiento", "Variación Metabólica", "Bajo en Carbs").
        c) Pregúntale qué comida quiere ver ahora (Desayuno, Almuerzo o Cena) o si prefiere ver también la suplementación.
        d) EJEMPLO de respuesta ideal: "¡Hola Robert! 💪 Hoy es ${currentDay}, que corresponde a tu fase de *Variación Metabólica* (Días 4-5). ¿Quieres ver tu almuerzo de hoy o la suplementación pre-entreno? 🍗"
        e) Entrega las porciones de forma interactiva y con emojis de alimentos (🍗🥑🍳🥩).
-    7. Resto de Mensajes: CORTOS (máx 3 oraciones), usa emojis (💪, 😊, 🔥) y termina con una pregunta motivadora.${profileQuestionInstruction}`;
+    8. Resto de Mensajes: CORTOS (máx 3 oraciones), usa emojis (💪, 😊, 🔥) y termina con una pregunta motivadora.${profileQuestionInstruction}`;
 
     const response = await openai.chat.completions.create({
         model: 'gpt-4o',
