@@ -112,6 +112,53 @@ const amountPaid = Math.max(0, planPrice - debt);
 
 **Nota importante:** El campo `amountPaid` en Firestore acumula el total histórico de todos los pagos del cliente a lo largo del tiempo (renovaciones incluidas). NO usarlo para calcular lo pagado en el plan actual. Usar siempre `planPrice - debt`.
 
+## Mejoras del Bot (Abril 2026)
+
+### ✅ Política de acceso por días vencido (2026-04-13)
+
+| Días vencido | Acceso |
+|---|---|
+| 0 | ✅ Activo, acceso completo |
+| 1 - 14 | ✅ Acceso completo, sin ningún aviso ni link de pago |
+| 15+ | ❌ Bloquea rutinas, dieta, voucher, historial y estado de membresía. Responde preguntas generales con normalidad, sin mencionar el bloqueo ni generar links a menos que el cliente lo pida directamente |
+
+**Razón:** Gimnasio pequeño con ambiente de confianza entre todos. No se quiere presionar a los clientes con avisos constantes. Si el cliente quiere renovar, escribe al bot y Sofía le ayuda.
+
+### ✅ Recordatorios automáticos de membresía (2026-04-13)
+
+Función cron `membershipReminder` en `index.ts`, corre todos los días a las **7 PM hora Lima**:
+
+- **3 días antes del vencimiento:** Envía aviso amigable por WhatsApp vía Twilio. Sin link de pago (ese lo genera Sofía cuando el cliente escribe).
+- **Recordatorio de deuda:** Cada 7 días desde `startDate`, si `debt > 0`, envía recordatorio del saldo pendiente. Se detiene automáticamente cuando `debt` llega a 0.
+
+### ✅ Personalidad de Sofía mejorada (2026-04-13)
+
+- Usa expresiones peruanas naturales: "¡De una!", "¡Qué crack!", "¡No te rajes!", "al toque", "bacán".
+- Reacciona emocionalmente según contexto: celebra logros antes de dar consejos.
+- Emojis variados según situación (no siempre los mismos).
+- Puede hacer bromas cortas cuando el momento lo permite.
+
+### ✅ Estilo de respuesta WhatsApp (2026-04-13)
+
+- Sin listas numeradas — máximo 3 ítems con emojis como viñetas.
+- Sin negritas para subtítulos — solo para resaltar UNA palabra clave.
+- Para preguntas técnicas de fitness: máx 2-3 oraciones + oferta de profundizar interactivamente.
+- Saludo de primer contacto: natural y directo, sin listar funciones como un menú.
+
+### ✅ Bot responde preguntas generales fuera del gym (2026-04-13)
+
+El bot no está restringido a temas del gimnasio. Puede responder cualquier pregunta general (fitness, nutrición, temas educativos, etc.) con el tono de Sofía. Esto genera engagement y fideliza a clientes que no conocen la IA.
+
+### ✅ Reconocer intención de pago (`messageProcessor.ts`) (2026-04-09)
+
+Si el cliente expresa intención de pagar/renovar, Sofía celebra la decisión, genera el link y no menciona el vencimiento en esa respuesta.
+
+### ⏳ Unificar nombre del remitente en WhatsApp
+
+**Pendiente:** Ir a Twilio Console → Messaging → Senders → WhatsApp Senders → tu número, y verificar/unificar el display name. También revisar en Meta Business Manager → WhatsApp Manager → tu número → Editar perfil.
+
+---
+
 ## Documentos Archivados
 
 Los siguientes archivos son documentación histórica del proyecto, ya completada. No reflejan el estado actual:

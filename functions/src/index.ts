@@ -237,6 +237,74 @@ export const generateCulqiLink = functions
         }
     });
 
+// Recordatorio automático 3 días antes del vencimiento
+// Corre todos los días a las 7 PM hora Lima
+export const membershipReminder = functions
+    .runWith({ memory: '512MB', timeoutSeconds: 300 })
+    .pubsub.schedule('0 19 * * *')
+    .timeZone('America/Lima')
+    .onRun(async () => {
+        const admin = require('firebase-admin');
+        if (!admin.apps.length) admin.initializeApp();
+        const db = admin.firestore();
+
+        const in3days = new Date();
+        in3days.setHours(0, 0, 0, 0);
+        in3days.setDate(in3days.getDate() + 3);
+        const in3daysStr = in3days.toISOString().split('T')[0];
+
+        const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+        const FROM = 'whatsapp:+51907935299';
+
+        // Buscar miembros cuya membresía vence en exactamente 3 días
+        const snap = await db.collection('members').where('endDate', '==', in3daysStr).get();
+        for (const doc of snap.docs) {
+            const member = doc.data();
+            const name = (member.name || 'amigo').split(' ')[0];
+            const phone = member.phone;
+            if (!phone) continue;
+
+            const msg = `¡Hola ${name}! 😊 Te aviso que tu membresía en MegaGym vence en 3 días. ¡Renueva a tiempo y no pierdas el ritmo! 💪🔥`;
+            try {
+                await twilioClient.messages.create({ from: FROM, to: `whatsapp:${phone}`, body: msg });
+                console.log(`✅ Recordatorio 3 días antes enviado a ${phone}`);
+            } catch (e) {
+                console.error(`❌ Error enviando recordatorio a ${phone}:`, e);
+            }
+        }
+
+        // Recordatorio de deuda pendiente — cada 7 días desde startDate
+        const debtSnap = await db.collection('members').where('debt', '>', 0).get();
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        for (const doc of debtSnap.docs) {
+            const member = doc.data();
+            const phone = member.phone;
+            if (!phone || !member.startDate) continue;
+
+            const start = new Date(member.startDate);
+            start.setHours(0, 0, 0, 0);
+            const diffDays = Math.round((today.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+
+            // Solo enviar si pasaron exactamente 7, 14, 21... días desde startDate
+            if (diffDays <= 0 || diffDays % 7 !== 0) continue;
+
+            const name = (member.name || 'amigo').split(' ')[0];
+            const debt = Number(member.debt).toFixed(2);
+            const msg = `¡Hola ${name}! 😊 Te recuerdo que tienes un saldo pendiente de S/ ${debt} en MegaGym. Cuando puedas lo coordinas con nosotros 💪`;
+
+            try {
+                await twilioClient.messages.create({ from: FROM, to: `whatsapp:${phone}`, body: msg });
+                console.log(`✅ Recordatorio deuda enviado a ${phone} (día ${diffDays})`);
+            } catch (e) {
+                console.error(`❌ Error enviando recordatorio deuda a ${phone}:`, e);
+            }
+        }
+
+        return null;
+    });
+
 // Sirve imágenes de vouchers desde Storage sin necesitar permisos públicos
 export const serveVoucher = functions
     .runWith({ memory: '512MB' })
