@@ -171,3 +171,80 @@ Los siguientes archivos son documentación histórica del proyecto, ya completad
 
 *Nota para el Asistente AI: Si estás leyendo esto al iniciar un nuevo chat, confírmale al usuario que has asimilado el contexto del proyecto y estás listo para ayudar sin romper la lógica actual.*
 
+---
+
+## ActualizaciÃ³n Operativa (2026-04-20)
+
+### Mensajes y dashboard
+
+- La colecciÃ³n `messages` ya centraliza:
+  - mensajes entrantes del cliente (`inbound`);
+  - respuestas normales del bot (`outbound`);
+  - recordatorios automÃ¡ticos de `membershipReminder`.
+- La pantalla `Mensajes` del dashboard ya muestra el nombre real del cliente resolviÃ©ndolo desde `members` por telÃ©fono normalizado.
+- Existe una Cloud Function `sendManualWhatsAppMessage`, pero el dashboard **no la usa actualmente**.
+- DecisiÃ³n actual del producto: el nÃºmero de Twilio queda como canal principal del bot automÃ¡tico y el panel de `Mensajes` queda en modo visualizaciÃ³n/historial.
+
+### Recordatorios automÃ¡ticos
+
+- `membershipReminder` sigue ejecutÃ¡ndose todos los dÃ­as a las 7 PM hora Lima.
+- Desde 2026-04-19, ademÃ¡s de enviar por WhatsApp, tambiÃ©n guarda en `messages` los recordatorios automÃ¡ticos futuros.
+- Los recordatorios anteriores a este cambio no aparecen retroactivamente en `messages`.
+
+### Clases - Fase 1 completada
+
+Se completÃ³ la Fase 1 del mÃ³dulo de clases:
+
+- `src/pages/dashboard/ClassesPage.tsx` ya lee datos reales desde Firestore:
+  - `classes`
+  - `bookings`
+  - `members`
+- Crear una clase desde el dashboard ya persiste en `classes`.
+- El detalle de clase ya muestra inscritos reales cuando existen reservas reales.
+- `book_class` fue endurecida para validar:
+  - que la clase exista;
+  - que no estÃ© inactiva;
+  - que no se duplique la reserva del mismo miembro;
+  - que no se exceda la capacidad.
+- Esta lÃ³gica fue desplegada dentro de `twilioWebhookWhatsapp`, porque `processMessage` vive detrÃ¡s de ese webhook.
+
+### Vista demo de clases
+
+Mientras la colecciÃ³n `classes` estÃ© vacÃ­a, el dashboard `Clases` muestra una vista demo coherente para que no aparezca todo en cero.
+
+Base usada para la demo:
+
+- clases grupales de lunes a viernes a las 8:30 AM y 8:00 PM;
+- profesora `LIZ PIA`;
+- precio de `S/ 6 por clase`.
+
+La demo agrega horarios ficticios coherentes para completar la grilla semanal y llenar:
+
+- tarjetas de `Clases/Semana`, `Reservas`, `OcupaciÃ³n`, `Capacidad`;
+- grÃ¡fico de ocupaciÃ³n por dÃ­a;
+- detalle de inscritos por clase.
+
+Importante:
+
+- la demo es solo visual;
+- no escribe reservas ficticias en Firestore;
+- desaparece automÃ¡ticamente cuando existan clases reales cargadas en `classes`.
+
+## Pendientes actuales
+
+### Clases
+
+TodavÃ­a faltan estas piezas para dejar el sistema de clases maduro:
+
+- cancelaciÃ³n de reservas;
+- reprogramaciÃ³n o lista de espera;
+- recordatorios automÃ¡ticos de clase;
+- registro de asistencia / no-show;
+- sembrado opcional de horarios demo en Firestore real;
+- confirmaciones mÃ¡s ricas del bot con clase, horario e instructor.
+
+### Infraestructura
+
+- migrar desde `functions.config()` a params antes de marzo 2027;
+- actualizar runtime de `Node.js 20`;
+- revisar actualizaciÃ³n de `firebase-functions`.

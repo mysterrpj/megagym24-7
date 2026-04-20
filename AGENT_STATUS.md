@@ -1,44 +1,30 @@
 > [!NOTE]
-> **DOCUMENTO ARCHIVADO Y COMPLETADO** — Estado del sistema a enero 2026. Todo lo marcado como "pendiente" aquí ya fue implementado. La fuente de verdad actual es `CONTEXTO_PROYECTO.md`.
+> **DOCUMENTO ARCHIVADO Y SUPERADO**. Este estado corresponde a una etapa temprana del sistema. La fuente de verdad actual es `CONTEXTO_PROYECTO.md`.
 
----
+# Estado Histórico del Sistema
 
-# 🤖 Estado del Agente - Fit IA (Gym Management System)
+## Estado real actual (2026-04-20)
 
-## 📊 Resumen General
-El sistema **Fit IA** está actualmente funcional en su versión **MVP (Producto Mínimo Viable)**. La arquitectura base está completa, conectando un frontend moderno en React con los servicios de Firebase (Auth y Firestore).
+El sistema actual ya superó ampliamente el alcance de este documento histórico.
 
-### ✅ Lo que ya funciona:
-1.  **Infraestructura**:
-    *   Proyecto Vite + React + TypeScript configurado.
-    *   Tailwind CSS y Shadcn/UI para el diseño "Fitness Energetico" (Oscuro/Verde).
-    *   Conexión establecida con Firebase (Firestore y Auth).
+Resumen vigente:
 
-2.  **Autenticación**:
-    *   Página de Login funcional.
-    *   Registro de usuarios (admins) habilitado vía Firebase Auth.
+- Sofía está operativa en producción por WhatsApp.
+- Audios por `Whisper` están activos.
+- Pagos con `Culqi` están activos.
+- Recordatorios automáticos de deuda y vencimiento están activos.
+- La colección `messages` ya guarda también los recordatorios automáticos.
+- El dashboard `Mensajes` ya resuelve nombres reales de clientes.
+- El envío manual desde dashboard quedó desactivado por decisión de producto.
+- El módulo `Clases` ya entró en Fase 1 real con `Firestore` y validaciones de reservas.
 
-3.  **Base de Datos (Firestore)**:
-    *   Colecciones estructuradas: `members`, `memberships`, `classes`, `config`.
-    *   **Herramienta de Sembrado**: Botón en "Configuración" para crear datos de prueba automáticamente.
+## Qué mirar en lugar de este archivo
 
-4.  **Dashboard (Frontend)**:
-    *   **Inicio/Login**: Acceso seguro.
-    *   **Panel Principal**: Navegación lateral responsiva.
-    *   **Miembros**: Listado de clientes con buscador y filtros (datos reales de Firestore).
-    *   **Membresías**: Visualización de planes disponibles (datos reales).
-    *   **Clases**: Calendario semanal de actividades (datos reales).
-    *   **Pagos**: Gráficos de ingresos e historial (actualmente visual, listo para conectar datos).
-    *   **Configuración**: Gestión de datos del gimnasio y zona de desarrollador.
+Para estado vigente y reglas reales del proyecto, revisar:
 
-5.  **Backend (Cloud Functions)**:
-    *   `twilioWebhookWhatsapp`: Estructura lista para el Agente de IA.
-    *   `sendReminders`: Tareas programadas configuradas (stubs).
+- [CONTEXTO_PROYECTO.md](./CONTEXTO_PROYECTO.md)
+- [README.md](./README.md)
 
-### 🚧 En Progreso / Pendiente de Verificación (al momento de escritura):
-*   **Integración de Pagos Real**: La interfaz existe, pero falta conectar la pasarela de Stripe real (Claves API).
-*   **WhatsApp Bot Real**: La función existe, pero requiere configurar Twilio y OpenAI con claves reales para responder mensajes automáticamente.
-*   **Despliegue**: La app corre en local (`localhost`), falta subirla a internet (Firebase Hosting).
+## Motivo de archivo
 
----
-**Última actualización**: 29 de Enero, 2026.
+Se conserva solo como referencia histórica de una etapa MVP inicial.

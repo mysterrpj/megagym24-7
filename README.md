@@ -1,55 +1,64 @@
-# Fit IA - Asistente Virtual para Gimnasios
+# MegaGym 24/7
 
-Sistema de gestion de membresias y clases con asistente de IA por WhatsApp.
+Sistema de gestión para gimnasio con bot de WhatsApp, dashboard administrativo y pagos en línea.
 
-**Video**: [YouTube - Sin Codigo Lat]
+## Estado actual
 
-## Que Construiremos
+- Frontend en `React + Vite + TypeScript`
+- Backend en `Firebase Functions`
+- Base de datos en `Firestore`
+- WhatsApp vía `Twilio`
+- IA vía `OpenAI`
+- Pagos vía `Culqi`
+- Hosting en `Firebase Hosting`
 
-- Landing page moderna
-- Dashboard con mensajes, miembros, membresias, clases, pagos
-- Chat estilo WhatsApp para supervisar la IA
-- Pagos recurrentes con Stripe
-- Asistente IA que registra miembros, agenda clases y cobra automaticamente
+URL actual:
 
-## Stack
+- `https://fit-ia-megagym.web.app`
 
-| Tecnologia | Uso |
-|------------|-----|
-| Lovable | Generar UI inicial |
-| Supabase | Base de datos + Auth + Edge Functions |
-| Stripe | Pagos y suscripciones |
-| Twilio | WhatsApp Business API |
-| OpenAI | GPT-4o-mini para el asistente |
-| Vercel | Deploy |
+## Funcionalidades principales
 
-## Recursos
+- Gestión de miembros y membresías
+- Historial de mensajes del bot en dashboard
+- Recordatorios automáticos de vencimiento y deuda
+- Consulta de rutinas y dietas por WhatsApp
+- Generación de links de pago Culqi
+- Envío de voucher/comprobante
+- Transcripción de audios de WhatsApp
+- Módulo de clases conectado a Firestore
 
-| Archivo | Contenido |
-|---------|-----------|
-| [UI-PROMPT.md](./UI-PROMPT.md) | Prompt para Lovable |
+## Módulo de clases
 
-## Flujo del Video
+Actualmente:
 
-1. **Lovable** → Generar UI con el prompt
-2. **GitHub** → Sincronizar codigo
-3. **Antigravity** → Clonar y ajustar con IA
-4. **Supabase** → Configurar MCP, crear tablas automaticamente
-5. **Stripe** → Vincular productos y webhooks
-6. **Twilio** → Configurar sandbox de WhatsApp
-7. **OpenAI** → Agregar API key para el agente
-8. **Vercel** → Deploy final
+- el dashboard `Clases` ya lee `classes`, `bookings` y `members`;
+- crear una clase desde el panel ya guarda en Firestore;
+- el bot puede consultar clases y reservar;
+- las reservas validan duplicados y cupos;
+- si `classes` está vacío, el dashboard muestra una vista demo coherente para que no aparezca todo en cero.
 
-## Credenciales Necesarias (en Supabase Secrets)
+Pendiente:
 
-```
-OPENAI_API_KEY
-TWILIO_ACCOUNT_SID
-TWILIO_AUTH_TOKEN
-STRIPE_SECRET_KEY
-STRIPE_WEBHOOK_SECRET
-```
+- cancelación de reservas;
+- recordatorios automáticos de clase;
+- asistencia / no-show;
+- lista de espera o reprogramación.
 
----
+## Estructura clave
 
-Desarrollado para **Sin Codigo Lat**
+- `src/`: frontend del dashboard y vistas cliente
+- `functions/src/index.ts`: webhooks y funciones principales
+- `functions/src/bot/messageProcessor.ts`: cerebro del bot
+- `functions/src/bot/transcription.ts`: transcripción de audios
+- `CONTEXTO_PROYECTO.md`: fuente principal de verdad del proyecto
+
+## Documentación importante
+
+- [CONTEXTO_PROYECTO.md](./CONTEXTO_PROYECTO.md): contexto, reglas y estado real actual
+- [ROADMAP.md](./ROADMAP.md): roadmap histórico con actualización corta del estado
+- [AGENT_STATUS.md](./AGENT_STATUS.md): estado histórico con nota de superseded
+- [AGENTE_PERSONALIZADO_PLAN.md](./AGENTE_PERSONALIZADO_PLAN.md): plan histórico de Sofía
+
+## Nota
+
+Si vas a tocar lógica del bot o reglas de negocio, revisa primero `CONTEXTO_PROYECTO.md`.

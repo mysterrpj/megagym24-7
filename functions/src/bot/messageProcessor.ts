@@ -22,6 +22,58 @@ async function findMember(db: any, phone: string) {
     return null;
 }
 
+async function reserveClass(db: any, adminInner: any, args: any) {
+    const memSnap = await findMember(db, args.phone);
+    if (!memSnap) return { error: "Member not found" };
+
+    const memberId = memSnap.docs[0].id;
+    const classRef = db.collection('classes').doc(String(args.classId));
+
+    return db.runTransaction(async (transaction: any) => {
+        const classDoc = await transaction.get(classRef);
+        if (!classDoc.exists) {
+            return { error: "Class not found" };
+        }
+
+        const classData = classDoc.data() || {};
+        if (classData.status === 'inactive') {
+            return { error: "Class is inactive" };
+        }
+
+        const bookingQuery = db.collection('bookings').where('classId', '==', String(args.classId));
+        const bookingSnap = await transaction.get(bookingQuery);
+        const activeBookings = bookingSnap.docs.filter((doc: any) => (doc.data().status || 'confirmed') !== 'cancelled');
+
+        const alreadyBooked = activeBookings.some((doc: any) => doc.data().memberId === memberId);
+        if (alreadyBooked) {
+            return { error: "Member already booked in this class" };
+        }
+
+        const capacity = Math.max(1, Number(classData.capacity) || 0);
+        if (activeBookings.length >= capacity) {
+            return { error: "Class is full" };
+        }
+
+        const bookingRef = db.collection('bookings').doc();
+        transaction.set(bookingRef, {
+            memberId,
+            classId: String(args.classId),
+            date: args.date || null,
+            status: 'confirmed',
+            created_at: adminInner.firestore.FieldValue.serverTimestamp()
+        });
+
+        return {
+            success: true,
+            message: "Class booked successfully",
+            className: classData.name || null,
+            classTime: classData.time || classData.hour || null,
+            instructor: classData.instructor || null,
+            spotsLeft: Math.max(capacity - activeBookings.length - 1, 0)
+        };
+    });
+}
+
 export async function executeTool(name: string, args: any) {
     const adminInner = require('firebase-admin');
     if (!adminInner.apps.length) adminInner.initializeApp();
@@ -44,18 +96,7 @@ export async function executeTool(name: string, args: any) {
 
         case 'book_class':
             try {
-                const memSnap = await findMember(dbInner, args.phone);
-                if (!memSnap) return { error: "Member not found" };
-                const memberId = memSnap.docs[0].id;
-
-                await dbInner.collection('bookings').add({
-                    memberId: memberId,
-                    classId: args.classId,
-                    date: args.date,
-                    status: 'confirmed',
-                    created_at: adminInner.firestore.FieldValue.serverTimestamp()
-                });
-                return { success: true, message: "Class booked successfully" };
+                return await reserveClass(dbInner, adminInner, args);
             } catch (e: any) {
                 return { error: e.message };
             }

@@ -1,14 +1,13 @@
-import { useState, useEffect, FormEvent } from 'react';
+import { useState, useEffect } from 'react';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Search, Send, MoreVertical, Phone, Video, MessageSquare } from 'lucide-react';
+import { Search, MoreVertical, Phone, Video, MessageSquare } from 'lucide-react';
 
 import { db } from '@/lib/firebase';
-import { collection, query, orderBy, onSnapshot, addDoc, where, serverTimestamp } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot } from 'firebase/firestore';
 import { cn } from '@/lib/utils';
 
-// Types
 interface Message {
     id: string;
     content: string;
@@ -25,73 +24,85 @@ interface Conversation {
     unread?: number;
 }
 
+interface MemberRecord {
+    name?: string;
+    phone?: string;
+}
+
+function normalizePhone(phone: string) {
+    const digits = String(phone || '').replace(/\D/g, '');
+    if (!digits) return '';
+    return digits.slice(-9);
+}
+
 export function MessagesPage() {
     const [conversations, setConversations] = useState<Conversation[]>([]);
     const [selectedPhone, setSelectedPhone] = useState<string | null>(null);
     const [messages, setMessages] = useState<Message[]>([]);
-    const [newMessage, setNewMessage] = useState('');
+    const [memberNames, setMemberNames] = useState<Record<string, string>>({});
 
-    // 1. Listen for ALL messages to build conversation list (Simplified logic for Prototype)
-    // In production, you'd have a separate 'conversations' collection updated via Cloud Functions
+    useEffect(() => {
+        const q = query(collection(db, 'members'), orderBy('createdAt', 'desc'));
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            const nextMemberNames: Record<string, string> = {};
+
+            snapshot.docs.forEach((doc) => {
+                const data = doc.data() as MemberRecord;
+                const normalizedPhone = normalizePhone(data.phone || '');
+                if (!normalizedPhone || !data.name) return;
+                nextMemberNames[normalizedPhone] = data.name;
+            });
+
+            setMemberNames(nextMemberNames);
+        });
+
+        return () => unsubscribe();
+    }, []);
+
     useEffect(() => {
         const q = query(collection(db, 'messages'), orderBy('timestamp', 'desc'));
         const unsubscribe = onSnapshot(q, (snapshot) => {
             const tempMap = new Map<string, Conversation>();
 
-            snapshot.docs.forEach(doc => {
+            snapshot.docs.forEach((doc) => {
                 const data = doc.data() as Message;
                 if (!tempMap.has(data.phone)) {
+                    const normalizedPhone = normalizePhone(data.phone);
                     tempMap.set(data.phone, {
                         phone: data.phone,
                         lastMessage: data.content,
                         timestamp: data.timestamp,
-                        name: `User ${data.phone.slice(-4)}` // Placeholder name
+                        name: memberNames[normalizedPhone] || `User ${data.phone.slice(-4)}`
                     });
                 }
             });
+
             setConversations(Array.from(tempMap.values()));
         });
-        return () => unsubscribe();
-    }, []);
 
-    // 2. Listen for messages of SELECTED phone
+        return () => unsubscribe();
+    }, [memberNames]);
+
     useEffect(() => {
         if (!selectedPhone) return;
 
-        const q = query(
-            collection(db, 'messages'),
-            where('phone', '==', selectedPhone),
-            orderBy('timestamp', 'asc')
-        );
+        const normalizedSelectedPhone = normalizePhone(selectedPhone);
+        const q = query(collection(db, 'messages'), orderBy('timestamp', 'asc'));
 
         const unsubscribe = onSnapshot(q, (snapshot) => {
-            const msgs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Message));
+            const msgs = snapshot.docs
+                .map((doc) => ({ id: doc.id, ...doc.data() } as Message))
+                .filter((msg) => normalizePhone(msg.phone) === normalizedSelectedPhone);
             setMessages(msgs);
         });
 
         return () => unsubscribe();
     }, [selectedPhone]);
 
-    const handleSendMessage = async (e: FormEvent) => {
-        e.preventDefault();
-        if (!newMessage.trim() || !selectedPhone) return;
-
-        try {
-            await addDoc(collection(db, 'messages'), {
-                phone: selectedPhone,
-                content: newMessage,
-                direction: 'outbound',
-                timestamp: serverTimestamp()
-            });
-            setNewMessage('');
-        } catch (error) {
-            console.error("Error sending message:", error);
-        }
-    };
+    const selectedConversation = conversations.find((conv) => conv.phone === selectedPhone);
 
     return (
         <div className="flex h-[calc(100vh-8rem)] gap-6">
-            {/* Left Sidebar: Conversations */}
             <Card className="w-1/3 flex flex-col bg-neutral-900 border-neutral-800 overflow-hidden">
                 <div className="p-4 border-b border-neutral-800">
                     <h2 className="text-xl font-bold text-white mb-4">Mensajes</h2>
@@ -135,18 +146,17 @@ export function MessagesPage() {
                 </div>
             </Card>
 
-            {/* Right Side: Chat Window */}
             <Card className="flex-1 flex flex-col bg-neutral-900 border-neutral-800 overflow-hidden text-white relative">
                 {selectedPhone ? (
                     <>
-                        {/* Chat Header */}
                         <div className="p-4 border-b border-neutral-800 flex justify-between items-center bg-neutral-900">
                             <div className="flex items-center gap-3">
                                 <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-green-500 to-emerald-700 flex items-center justify-center text-white font-bold">
                                     {selectedPhone.slice(-2)}
                                 </div>
                                 <div>
-                                    <h3 className="font-bold">{selectedPhone}</h3>
+                                    <h3 className="font-bold">{selectedConversation?.name || selectedPhone}</h3>
+                                    <p className="text-xs text-gray-500">{selectedPhone}</p>
                                     <span className="text-xs text-green-500 flex items-center gap-1">
                                         <span className="w-2 h-2 rounded-full bg-green-500 inline-block animate-pulse"></span>
                                         En línea
@@ -160,7 +170,6 @@ export function MessagesPage() {
                             </div>
                         </div>
 
-                        {/* Messages Area */}
                         <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-black/20">
                             {messages.map((msg) => (
                                 <div
@@ -173,15 +182,8 @@ export function MessagesPage() {
                                     <div className={cn(
                                         "max-w-[70%] rounded-2xl p-3 px-4 text-sm leading-relaxed",
                                         msg.direction === 'outbound'
-                                            ? "bg-green-600 text-white rounded-tr-sm" // Whatsapp User (Green)
-                                            : "bg-neutral-800 text-white rounded-tl-sm"  // Response (Gray)
-                                        // Wait, usually Outbound (Me) is right/green. Inbound (User) is left/gray. 
-                                        // In this context, 'direction' in DB: 
-                                        // inbound = from User to System.
-                                        // outbound = from System to User.
-                                        // So if I am the ADMIN looking at the dashboard:
-                                        // User messages (inbound) should be LEFT (Gray/White).
-                                        // System messages (outbound) should be RIGHT (Green).
+                                            ? "bg-green-600 text-white rounded-tr-sm"
+                                            : "bg-neutral-800 text-white rounded-tl-sm"
                                     )}>
                                         <p>{msg.content}</p>
                                         <span className="text-[10px] opacity-70 block text-right mt-1">
@@ -192,19 +194,10 @@ export function MessagesPage() {
                             ))}
                         </div>
 
-                        {/* Input Area */}
                         <div className="p-4 bg-neutral-900 border-t border-neutral-800">
-                            <form onSubmit={handleSendMessage} className="flex gap-2">
-                                <Input
-                                    value={newMessage}
-                                    onChange={(e) => setNewMessage(e.target.value)}
-                                    placeholder="Escribe un mensaje..."
-                                    className="bg-neutral-800 border-0 focus-visible:ring-1 focus-visible:ring-green-500"
-                                />
-                                <Button type="submit" className="bg-green-600 hover:bg-green-700 w-12 h-12 rounded-lg p-0 flex items-center justify-center">
-                                    <Send className="w-5 h-5" />
-                                </Button>
-                            </form>
+                            <div className="rounded-lg border border-neutral-800 bg-neutral-950/60 px-4 py-3 text-sm text-gray-400">
+                                Este panel muestra el historial. Las respuestas al cliente se envian automaticamente desde el bot por WhatsApp.
+                            </div>
                         </div>
                     </>
                 ) : (
@@ -215,5 +208,5 @@ export function MessagesPage() {
                 )}
             </Card>
         </div>
-    )
+    );
 }

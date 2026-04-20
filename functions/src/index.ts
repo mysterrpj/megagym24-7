@@ -1,5 +1,9 @@
-
 import * as functions from "firebase-functions/v1";
+
+const admin = require('firebase-admin');
+if (!admin.apps.length) {
+    admin.initializeApp();
+}
 
 export const twilioWebhookWhatsapp = functions
     .runWith({ memory: '1GB', timeoutSeconds: 120 })
@@ -161,7 +165,6 @@ export const createCulqiCharge = functions
                     return;
                 }
 
-                // Si el cobro fue exitoso (no hay error), activar membresía
                 console.log('Charge result:', JSON.stringify({ id: charge.id, object: charge.object, outcome: charge.outcome, paid: charge.paid }));
                 if (charge.object !== 'error') {
                     const admin = require('firebase-admin');
@@ -169,7 +172,6 @@ export const createCulqiCharge = functions
                     const db = admin.firestore();
 
                     if (phone) {
-                        // Buscar con múltiples formatos de teléfono
                         const phoneFormats = new Set([
                             phone,
                             phone.startsWith('+') ? phone.slice(1) : '+' + phone,
@@ -184,7 +186,6 @@ export const createCulqiCharge = functions
                         if (snap && !snap.empty) {
                             const today = new Date();
                             const memberData = snap.docs[0].data();
-                            // Extender desde la fecha de vencimiento actual si aún no venció, si no desde hoy
                             const currentEnd = memberData.endDate ? new Date(memberData.endDate) : today;
                             const baseDate = currentEnd > today ? currentEnd : today;
                             const endDate = new Date(baseDate);
@@ -239,6 +240,42 @@ export const generateCulqiLink = functions
 
 // Recordatorio automático 3 días antes del vencimiento
 // Corre todos los días a las 7 PM hora Lima
+export const sendManualWhatsAppMessage = functions
+    .runWith({ memory: '512MB', timeoutSeconds: 120 })
+    .https.onCall(async (data: any) => {
+        const admin = require('firebase-admin');
+        if (!admin.apps.length) admin.initializeApp();
+        const db = admin.firestore();
+
+        const phone = String(data?.phone || '').trim();
+        const content = String(data?.content || '').trim();
+
+        if (!phone) {
+            throw new functions.https.HttpsError('invalid-argument', 'Phone is required.');
+        }
+
+        if (!content) {
+            throw new functions.https.HttpsError('invalid-argument', 'Message content is required.');
+        }
+
+        const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+        await twilioClient.messages.create({
+            from: 'whatsapp:+51907935299',
+            to: `whatsapp:${phone}`,
+            body: content
+        });
+
+        await db.collection('messages').add({
+            phone,
+            content,
+            direction: 'outbound',
+            timestamp: admin.firestore.FieldValue.serverTimestamp(),
+            source: 'manual_dashboard'
+        });
+
+        return { success: true };
+    });
+
 export const membershipReminder = functions
     .runWith({ memory: '512MB', timeoutSeconds: 300 })
     .pubsub.schedule('0 19 * * *')
@@ -267,13 +304,20 @@ export const membershipReminder = functions
             const msg = `¡Hola ${name}! 😊 Te aviso que tu membresía en MegaGym vence en 3 días. ¡Renueva a tiempo y no pierdas el ritmo! 💪🔥`;
             try {
                 await twilioClient.messages.create({ from: FROM, to: `whatsapp:${phone}`, body: msg });
+                await db.collection('messages').add({
+                    phone,
+                    content: msg,
+                    direction: 'outbound',
+                    timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                    source: 'scheduled_membership_reminder'
+                });
                 console.log(`✅ Recordatorio 3 días antes enviado a ${phone}`);
             } catch (e) {
                 console.error(`❌ Error enviando recordatorio a ${phone}:`, e);
             }
         }
 
-        // Recordatorio de deuda pendiente — cada 7 días desde startDate
+        // Recordatorio de deuda pendiente: cada 7 días desde startDate
         const debtSnap = await db.collection('members').where('debt', '>', 0).get();
         const today = new Date();
         today.setHours(0, 0, 0, 0);
@@ -287,7 +331,6 @@ export const membershipReminder = functions
             start.setHours(0, 0, 0, 0);
             const diffDays = Math.round((today.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
 
-            // Solo enviar si pasaron exactamente 7, 14, 21... días desde startDate
             if (diffDays <= 0 || diffDays % 7 !== 0) continue;
 
             const name = (member.name || 'amigo').split(' ')[0];
@@ -296,6 +339,13 @@ export const membershipReminder = functions
 
             try {
                 await twilioClient.messages.create({ from: FROM, to: `whatsapp:${phone}`, body: msg });
+                await db.collection('messages').add({
+                    phone,
+                    content: msg,
+                    direction: 'outbound',
+                    timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                    source: 'scheduled_debt_reminder'
+                });
                 console.log(`✅ Recordatorio deuda enviado a ${phone} (día ${diffDays})`);
             } catch (e) {
                 console.error(`❌ Error enviando recordatorio deuda a ${phone}:`, e);

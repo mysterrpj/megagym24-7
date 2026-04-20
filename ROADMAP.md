@@ -1,51 +1,64 @@
 > [!NOTE]
-> **DOCUMENTO ARCHIVADO Y COMPLETADO** — Roadmap histórico del proyecto. Todas las fases están completadas (Stripe fue reemplazado por Culqi, el bot está en producción). La fuente de verdad actual es `CONTEXTO_PROYECTO.md`.
+> **DOCUMENTO ARCHIVADO Y COMPLETADO**. Este roadmap ya no guía el desarrollo actual. La fuente de verdad vigente es `CONTEXTO_PROYECTO.md`.
+
+# Roadmap Histórico - MegaGym 24/7
+
+Este archivo se conserva como referencia histórica del proyecto.
+
+## Estado real actual (2026-04-20)
+
+Lo que ya está operativo:
+
+- bot de WhatsApp en producción con `Twilio + OpenAI`;
+- pagos operativos con `Culqi`;
+- recordatorios automáticos de vencimiento y deuda activos;
+- historial de mensajes y recordatorios visible en dashboard;
+- módulo de clases en Fase 1 conectado a `Firestore`;
+- validación de cupos y duplicados en reservas del bot ya implementada;
+- vista demo de clases activa cuando `classes` está vacía.
+
+Pendientes vivos, pero fuera de este roadmap histórico:
+
+- cancelación de reservas de clases;
+- recordatorios automáticos de clase;
+- asistencia / no-show;
+- lista de espera o reprogramación;
+- migración futura de `functions.config()` y runtime `Node.js 20`.
 
 ---
 
-# 🗺️ Roadmap del Proyecto - Fit IA
+## Fase 1: Cimientos y MVP (Completado)
 
-Este documento detalla los pasos restantes para llevar el sistema de local a producción.
+- [x] Configuración del entorno de desarrollo
+- [x] Dashboard base
+- [x] Firebase Auth + Firestore
+- [x] CRUD principal de miembros y membresías
+- [x] Seeder / datos de prueba base
 
-## 🟢 Fase 1: Cimientos y MVP (Completado)
-- [x] Configuración del entorno de desarrollo (Vite, React, Tailwind).
-- [x] Diseño de UI/UX "Dark Mode & Green".
-- [x] Configuración de Firebase (Proyecto, Auth, Firestore).
-- [x] Desarrollo de todas las páginas del Dashboard.
-- [x] Conexión de páginas a Base de Datos (Lectura/Escritura).
-- [x] Sistema de Datos de Prueba (Seeder).
+## Fase 2: Integraciones externas (Completado)
 
-## 🟡 Fase 2: Integraciones Externas (Próximo Paso)
-Esta fase conecta el sistema con el mundo real (Cobros y Mensajes).
+- [x] WhatsApp vía Twilio
+- [x] IA vía OpenAI
+- [x] Transcripción de audios
+- [x] Pagos en línea
 
-- [ ] **Pasarela de Pagos (Stripe)**
-    - [x] Obtener claves de API de Stripe (Test Mode).
-    - [x] Configurar Cloud Function `createStripeCheckout`.
-    - [x] Botón "Suscribirse" integrado en el Dashboard (Planes) con redirección a Stripe.
-    - [x] Crear Webhook para confirmar pagos (Función desplegada, configuración pendiente en Stripe Dashboard).
+Nota:
 
-- [ ] **Agente IA de WhatsApp (Twilio + OpenAI)**
-    - [x] Configurar variables de entorno y reintentar despliegue.
+- `Stripe` fue una ruta inicial de este roadmap, pero quedó descartado en la implementación real.
+- La integración final usada en producción es `Culqi`.
 
-## 🟢 Fase 3: Despliegue y Producción (COMPLETADO)
-Llevar la aplicación a internet y asegurar el acceso.
+## Fase 3: Producción (Completado)
 
-- [x] **Despliegue (Hosting)**
-    - [x] Configurar `firebase.json`.
-    - [x] Frontend desplegado en Firebase Hosting (`fit-ia-megagym.web.app`).
+- [x] Deploy en Firebase Hosting
+- [x] Deploy de Cloud Functions
+- [x] Bot en producción
+- [x] Dashboard administrativo funcional
 
-- [x] **Seguridad y Acceso**
-    - [x] Implementar Registro de Usuarios.
-    - [x] Implementar Roles (Admin vs Miembro).
-    - [x] Proteger rutas del Admin Dashboard.
-    - [x] Crear Dashboard simple para Miembros.
-Llevar la aplicación a internet.
+## Fase 4: Expansión (Pendiente histórico)
 
-- [ ] **Dominio Personalizado** (Opcional).
-- [ ] **Afinar Reglas Firestore**: Refinar `firestore.rules` para producción estricta.
+Ideas que siguen siendo válidas como backlog:
 
-## 🟣 Fase 4: Expansión (Futuro)
-Ideas para versiones posteriores.
-- [ ] App Móvil nativa para clientes (QR para entrar).
-- [ ] Control de Acceso (Torniquetes conectados a Arduino/ESP32).
-- [ ] Reportes avanzados de Finanzas (Exportar a Excel/PDF).
+- app móvil para clientes;
+- control de acceso;
+- reportes financieros más avanzados;
+- automatizaciones adicionales de retención.
