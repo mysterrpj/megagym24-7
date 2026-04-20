@@ -22,6 +22,183 @@ async function findMember(db: any, phone: string) {
     return null;
 }
 
+function getLimaDateParts(date: Date) {
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Lima',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+    });
+    const parts = formatter.formatToParts(date);
+    const year = parts.find((part) => part.type === 'year')?.value || '2000';
+    const month = parts.find((part) => part.type === 'month')?.value || '01';
+    const day = parts.find((part) => part.type === 'day')?.value || '01';
+    return { year, month, day };
+}
+
+function getLimaTodayString() {
+    const { year, month, day } = getLimaDateParts(new Date());
+    return `${year}-${month}-${day}`;
+}
+
+function getClassDayFromDate(dateString: string) {
+    const date = new Date(`${dateString}T00:00:00-05:00`);
+    return (date.getUTCDay() + 6) % 7;
+}
+
+function resolveNextBookingDate(targetDay: number, requestedDate?: string) {
+    if (requestedDate) {
+        return requestedDate;
+    }
+
+    const todayString = getLimaTodayString();
+    const today = new Date(`${todayString}T00:00:00-05:00`);
+    const todayClassDay = (today.getUTCDay() + 6) % 7;
+    const delta = (targetDay - todayClassDay + 7) % 7;
+    const nextDate = new Date(today);
+    nextDate.setUTCDate(nextDate.getUTCDate() + delta);
+    const { year, month, day } = getLimaDateParts(nextDate);
+    return `${year}-${month}-${day}`;
+}
+
+function normalizeText(value: string) {
+    return String(value || '')
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '');
+}
+
+function extractDesiredTime(text: string) {
+    const normalized = normalizeText(text);
+
+    if (
+        normalized.includes('8:30') ||
+        normalized.includes('8 y 30') ||
+        normalized.includes('8 y media') ||
+        normalized.includes('8 am') ||
+        normalized.includes('8 a m') ||
+        normalized.includes('8 de la manana') ||
+        normalized.includes('8 de la mañana')
+    ) {
+        return '08:30';
+    }
+
+    if (
+        normalized.includes('8 pm') ||
+        normalized.includes('8 p m') ||
+        normalized.includes('8 de la noche') ||
+        normalized.includes('8 en la noche') ||
+        normalized.includes('8 de la tarde')
+    ) {
+        return '20:00';
+    }
+
+    return '';
+}
+
+function findDesiredTimeFromContext(currentMessage: string, historyTexts: string[]) {
+    return extractDesiredTime(currentMessage) || extractDesiredTime([...historyTexts].reverse().join(' '));
+}
+
+function formatClassTimeLabel(time: string) {
+    if (time === '08:30') return '8:30 AM';
+    if (time === '20:00') return '8:00 PM';
+    return time || 'tu horario elegido';
+}
+
+function sanitizeAssistantReply(content: string) {
+    const text = String(content || '');
+    return text
+        .replace(/https?:\/\/pago-megagym\.com\S*/gi, '')
+        .replace(/\[([^\]]+)\]\(https?:\/\/fit-ia-megagym\.com\/[^)\s]*\)/gi, '$1')
+        .replace(/\[([^\]]+)\]\(https?:\/\/fit-ia-megagym\.web\.app\/(?!pagar\?)[^)\s]*\)/gi, '$1')
+        .replace(/https?:\/\/fit-ia-megagym\.com\/\S*/gi, '')
+        .replace(/https?:\/\/fit-ia-megagym\.web\.app\/(?!pagar\?)\S*/gi, '')
+        .replace(/https?:\/\/\S*(class-group|class-groupal|clase-grupal)\S*/gi, '')
+        .replace(/\(enlace ficticio\)/gi, '')
+        .trim();
+}
+
+async function resolveClassBookingTarget(db: any, args: { classId?: string; planName?: string; bookingDate?: string; desiredTime?: string }) {
+    const requestedClassId = String(args.classId || '').trim();
+    if (requestedClassId) {
+        const classDoc = await db.collection('classes').doc(requestedClassId).get();
+        if (classDoc.exists) {
+            const classData = classDoc.data() || {};
+            return {
+                id: classDoc.id,
+                data: classData,
+                bookingDate: args.bookingDate || resolveNextBookingDate(Number(classData.day ?? 0)),
+            };
+        }
+    }
+
+    const requestedTime = String(args.desiredTime || '').trim() || extractDesiredTime(String(args.planName || ''));
+    const requestedDate = String(args.bookingDate || '');
+    const requestedDay = requestedDate ? getClassDayFromDate(requestedDate) : null;
+    const classesSnap = await db.collection('classes').where('status', '==', 'active').get();
+
+    let classes = classesSnap.docs.map((doc: any) => ({
+        id: doc.id,
+        data: doc.data() || {},
+    }));
+
+    if (requestedDay !== null) {
+        classes = classes.filter((item: any) => Number(item.data.day ?? 0) === requestedDay);
+    }
+
+    if (requestedTime) {
+        classes = classes.filter((item: any) => String(item.data.time || '') === requestedTime);
+    }
+
+    const selectedClass = classes[0];
+    if (!selectedClass) {
+        return null;
+    }
+
+    return {
+        id: selectedClass.id,
+        data: selectedClass.data,
+        bookingDate: requestedDate || resolveNextBookingDate(Number(selectedClass.data.day ?? 0)),
+    };
+}
+
+function mentionsGroupClassContext(text: string) {
+    const normalized = normalizeText(text);
+    return ['aerobico', 'aerobicos', 'clase grupal', 'fullbody', 'liz pia', 'profesora liz', 'prof liz']
+        .some((token) => normalized.includes(token));
+}
+
+function mentionsMachineDayPass(text: string) {
+    const normalized = normalizeText(text);
+    return ['clase libre', 'maquina', 'maquinas', 'gym por dia', 'gimnasio por dia', 'pase por dia', 'pase diario']
+        .some((token) => normalized.includes(token));
+}
+
+function mentionsPaymentIntent(text: string) {
+    const normalized = normalizeText(text);
+    return ['quiero pagar', 'pasame el link', 'pagar por yape', 'pagar por tarjeta', 'mandame el link', 'manda el link', 'enviame el link', 'quiero el link', 'link de pago', 'por yape', 'por tarjeta']
+        .some((token) => normalized.includes(token));
+}
+
+function mentionsReservationIntent(text: string) {
+    const normalized = normalizeText(text);
+    return ['quiero reservar', 'reservar', 'reserva', 'separar', 'quiero separar']
+        .some((token) => normalized.includes(token));
+}
+
+function mentionsFollowupForPendingLink(text: string) {
+    const normalized = normalizeText(text);
+    return ['ok', 'okei', 'dale', 'si', 'que paso', 'qué pasó', 'y el link', 'pasamelo', 'pasamelo', 'envialo', 'envíalo', 'mandalo', 'mándalo']
+        .some((token) => normalized.includes(token));
+}
+
+function assistantPromisedPaymentLink(text: string) {
+    const normalized = normalizeText(text);
+    return ['generare el enlace', 'te lo paso', 'enlace de pago', 'link de pago', 'ahora generare', 'un par de segunditos']
+        .some((token) => normalized.includes(token));
+}
+
 async function reserveClass(db: any, adminInner: any, args: any) {
     const memSnap = await findMember(db, args.phone);
     if (!memSnap) return { error: "Member not found" };
@@ -85,8 +262,38 @@ export async function executeTool(name: string, args: any) {
             return snapshot.docs.map((doc: any) => ({ id: doc.id, ...doc.data() }));
 
         case 'get_available_classes':
-            const classesSnap = await dbInner.collection('classes').get();
-            return classesSnap.docs.map((doc: any) => ({ id: doc.id, ...doc.data() }));
+            try {
+                const requestedDate = args.date || '';
+                const requestedDay = requestedDate ? getClassDayFromDate(requestedDate) : null;
+                const classesSnap = await dbInner.collection('classes').where('status', '==', 'active').get();
+
+                let classes = classesSnap.docs.map((doc: any) => {
+                    const data = doc.data() || {};
+                    const day = Number(data.day ?? 0);
+                    return {
+                        id: doc.id,
+                        ...data,
+                        day,
+                        bookingDate: resolveNextBookingDate(day, requestedDate),
+                    };
+                });
+
+                if (requestedDay !== null) {
+                    classes = classes.filter((item: any) => item.day === requestedDay);
+                }
+
+                classes.sort((a: any, b: any) => {
+                    if (a.day !== b.day) return a.day - b.day;
+                    return String(a.time || '').localeCompare(String(b.time || ''));
+                });
+
+                return {
+                    date: requestedDate || null,
+                    classes,
+                };
+            } catch (e: any) {
+                return { error: e.message };
+            }
 
         case 'check_member_status':
             const membersSnap = await findMember(dbInner, args.phone);
@@ -103,6 +310,28 @@ export async function executeTool(name: string, args: any) {
 
         case 'generate_payment_link':
             try {
+                let planName = args.planName;
+                let bookingDate = args.bookingDate || '';
+                let classId = String(args.classId || '').trim();
+
+                if (args.paymentType === 'class_booking') {
+                    const resolvedClass = await resolveClassBookingTarget(dbInner, {
+                        classId,
+                        planName,
+                        bookingDate,
+                        desiredTime: args.desiredTime || '',
+                    });
+
+                    if (!resolvedClass) {
+                        return { error: 'Class not found.' };
+                    }
+
+                    classId = resolvedClass.id;
+                    const classData = resolvedClass.data || {};
+                    bookingDate = resolvedClass.bookingDate || bookingDate || resolveNextBookingDate(Number(classData.day ?? 0));
+                    planName = planName || `${classData.name || 'Clase grupal'} ${classData.time || ''}`.trim();
+                }
+
                 // Buscar datos del miembro si no vienen como argumento
                 let customerName = args.customerName;
                 let dni = args.dni;
@@ -123,7 +352,10 @@ export async function executeTool(name: string, args: any) {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         phone: args.phone,
-                        planName: args.planName,
+                        planName,
+                        paymentType: args.paymentType || 'membership',
+                        classId,
+                        bookingDate,
                         customerName,
                         dni,
                         email
@@ -359,7 +591,7 @@ export async function processMessage(db: any, phone: string, messageText: string
             type: "function",
             function: {
                 name: "get_available_classes",
-                description: "Get available classes for a specific date or upcoming week",
+                description: "Get active group classes and their next reservable date. Use this when the customer asks for aerobics, group classes, or FULLBODY schedules.",
                 parameters: {
                     type: "object",
                     properties: {
@@ -388,12 +620,15 @@ export async function processMessage(db: any, phone: string, messageText: string
             type: "function",
             function: {
                 name: "generate_payment_link",
-                description: "Generate a payment link (Culqi) for a specific plan. If the customer is registered, their data is already available — do NOT ask the user for it.",
+                description: "Generate a payment link (Culqi) for a membership or a paid group class. Use paymentType='membership' for renewals and paymentType='class_booking' only for paid group classes after the user has chosen the schedule. Do NOT use this for gym machine day passes.",
                 parameters: {
                     type: "object",
                     properties: {
                         phone: { type: "string", description: "Customer's phone number exactly as provided in the context." },
                         planName: { type: "string", description: "Name of the plan (e.g. '1 mes', '2 meses', '3 meses')" },
+                        paymentType: { type: "string", description: "Use 'membership' or 'class_booking'." },
+                        classId: { type: "string", description: "Required when paymentType is 'class_booking'." },
+                        bookingDate: { type: "string", description: "Required when paymentType is 'class_booking'. Date in YYYY-MM-DD." },
                         customerName: { type: "string", description: "User's full name (optional if already registered)" },
                         dni: { type: "string", description: "User's DNI (optional if already registered)" },
                         email: { type: "string", description: "User's email (optional if already registered)" }
@@ -567,6 +802,46 @@ export async function processMessage(db: any, phone: string, messageText: string
         content: doc.data().content
     }));
 
+    const historyTexts = historySnapshot.docs.map((doc: any) => String(doc.data().content || ''));
+    const normalizedCurrent = normalizeText(messageText);
+
+    const assistantPendingLink = historyTexts.some((text: string) => assistantPromisedPaymentLink(text));
+
+    if (!mentionsMachineDayPass(messageText) && (mentionsPaymentIntent(messageText) || (assistantPendingLink && mentionsFollowupForPendingLink(messageText)) || (mentionsReservationIntent(messageText) && !!extractDesiredTime(messageText)))) {
+        const recentClassContext = [messageText, ...historyTexts].some((text) => mentionsGroupClassContext(text));
+        if (recentClassContext) {
+            const desiredTime = findDesiredTimeFromContext(messageText, historyTexts);
+            if (!desiredTime) {
+                return 'Tengo FULLBODY con LIZ PIA a las 8:30 AM y 8:00 PM 😊 ¿Cuál de esos horarios deseas para enviarte el link de S/ 6?';
+            }
+
+            const requestedDate = normalizedCurrent.includes('hoy') ? getLimaTodayString() : '';
+            const availableClasses = await executeTool('get_available_classes', { date: requestedDate || undefined });
+            const classes = Array.isArray(availableClasses?.classes) ? availableClasses.classes : [];
+            const selectedClass = classes.find((item: any) => String(item.time || '') === desiredTime);
+
+            if (!selectedClass) {
+                return 'No encontré ese horario disponible ahora mismo. Tengo FULLBODY con LIZ PIA a las 8:30 AM y 8:00 PM 💪 ¿Cuál deseas reservar?';
+            }
+
+            const paymentLink = await executeTool('generate_payment_link', {
+                phone,
+                planName: `${selectedClass.name} ${selectedClass.time}`,
+                paymentType: 'class_booking',
+                classId: selectedClass.id,
+                bookingDate: selectedClass.bookingDate
+            });
+
+            if (paymentLink?.url) {
+                const scheduleLabel = formatClassTimeLabel(String(selectedClass.time || ''));
+                return `Listo${clientFirstName ? ` ${clientFirstName}` : ''}. Aqui tienes tu link para reservar ${selectedClass.name} con LIZ PIA a las ${scheduleLabel}. Son S/ 6 y puedes pagar por Yape o tarjeta en Culqi: ${paymentLink.url}`;
+                return `¡Perfecto${clientFirstName ? ` ${clientFirstName}` : ''}! 🙌 Aquí tienes tu link para reservar ${selectedClass.name} con LIZ PIA a las ${selectedClass.time}. Son S/ 6 y puedes pagar por Yape o tarjeta en Culqi 👇 ${paymentLink.url}`;
+            }
+
+            return 'Estoy teniendo un problema para generar el link de pago en este momento. Intenta nuevamente en un instante, por favor.';
+        }
+    }
+
     messages.push({ role: 'user', content: messageText });
 
     // Detect first-time user (no previous messages in history)
@@ -601,8 +876,14 @@ export async function processMessage(db: any, phone: string, messageText: string
         * 1 Mes: S/ 80
         * 2 Meses: S/ 120 (Se puede pagar en 2 partes)
         * 3 Meses: S/ 150 (Se puede pagar en 2 partes)
-        * Clase diaria: S/ 6
-    - Clases Grupales (Aeróbicos/Localizado): Lunes a Sábado a las 8:00 AM y 8:00 PM.
+    - Clases Grupales:
+        * FULLBODY con LIZ PIA
+        * Lunes a Viernes: 8:30 AM y 8:00 PM
+        * Precio: S/ 6 por clase grupal
+        * Estas clases sí se pueden reservar y pagar por link
+    - Clase libre de máquinas / pase por día:
+        * Se paga presencialmente en recepción
+        * NO generar link de pago para esto
     - Métodos de Pago: Yape, Plin, Efectivo, Tarjeta de Crédito/Débito (vía link Culqi).
 
     CONTEXTO ACTUAL:
@@ -621,7 +902,13 @@ export async function processMessage(db: any, phone: string, messageText: string
        - daysOverdue es null o 0: Membresía activa. Comportamiento normal, acceso completo.
        - daysOverdue entre 1 y 14: Acceso completo. Responde con normalidad sin ningún aviso de vencimiento ni links de pago. Solo si el cliente PIDE renovar o preguntar por su membresía, entonces ayúdalo.
        - daysOverdue >= 15: MODO ACCESO RESTRINGIDO. NO uses get_student_routine, get_student_diet, send_payment_voucher, get_payment_history ni check_member_status. Responde preguntas generales (horarios, precios generales, fitness, cualquier tema) con total normalidad. NO menciones que está bloqueado, NO generes links de pago, NO menciones el vencimiento a menos que el cliente lo pregunte directamente.
-    5. INTENCIÓN DE PAGO: Si el cliente expresa que va a pagar o renovar (frases como "voy a pagar", "ya voy a renovar", "quiero pagar", "voy a hacerlo"), celebra su decisión con energía y genera el link de pago con generate_payment_link. Responde así: "¡Perfecto ${clientFirstName}! Me alegra mucho 🙌 Aquí tienes tu link para renovar 👇 [link]. En cuanto se confirme el pago, tu acceso queda activo automáticamente. ¡Sigamos entrenando! 💪" No menciones el vencimiento en esta respuesta.
+    5. REGLAS DE COBRO:
+       - Si el cliente quiere pagar o renovar su membresía, usa generate_payment_link con paymentType='membership'.
+       - Si el cliente quiere reservar o pagar una clase grupal (aeróbicos, clase grupal, FULLBODY), usa get_available_classes para ofrecer solo los horarios reales. Primero haz que elija uno. Luego usa generate_payment_link con paymentType='class_booking', classId y bookingDate. Explica que la reserva queda confirmada cuando Culqi apruebe el pago de S/ 6.
+       - NO uses book_class directamente para una clase grupal pagada. La reserva se confirma después del pago.
+       - Si el cliente pide clase libre, pase diario, usar máquinas por un día o gimnasio por día, NO generes link. Indica que ese pago se realiza personalmente en recepción.
+       - Cuando generes link de membresía, responde con entusiasmo como antes. Cuando generes link de clase grupal, deja claro que es sólo para clases grupales y no para clase libre de máquinas.
+       - Si el cliente todavía no te dijo día u hora de la clase grupal, NO generes el link todavía. Primero aclara si quiere 8:30 AM u 8:00 PM.
     6. Si pide su rutina, usa 'get_student_routine' (solo si daysOverdue < 20). Si pide su dieta, usa 'get_student_diet' (solo si daysOverdue < 20).
     7. Si responde a tus preguntas de perfil (objetivo, nivel, etc.), usa 'update_member_profile' inmediatamente.
     8. ENTREGA DE DIETA (NIVEL EXPERTO): Cuando uses 'get_student_diet', NUNCA envíes todo el plan de golpe. Sigue esta lógica exacta:
@@ -647,14 +934,43 @@ export async function processMessage(db: any, phone: string, messageText: string
 
     if (responseMessage.tool_calls) {
         const toolMessages: any[] = [...messages, responseMessage];
+        let directToolReply = '';
         for (const toolCall of responseMessage.tool_calls) {
-            const functionResult = await executeTool(toolCall.function.name, JSON.parse(toolCall.function.arguments));
+            const toolArgs = JSON.parse(toolCall.function.arguments || '{}');
+            if (toolCall.function.name === 'generate_payment_link' && toolArgs.paymentType === 'class_booking') {
+                const desiredTimeFromContext = findDesiredTimeFromContext(messageText, historyTexts);
+                if (desiredTimeFromContext) {
+                    const requestedDate = normalizedCurrent.includes('hoy') ? getLimaTodayString() : '';
+                    const availableClasses = await executeTool('get_available_classes', { date: requestedDate || undefined });
+                    const classes = Array.isArray(availableClasses?.classes) ? availableClasses.classes : [];
+                    const selectedClass = classes.find((item: any) => String(item.time || '') === desiredTimeFromContext);
+                    if (selectedClass) {
+                        toolArgs.classId = selectedClass.id;
+                        toolArgs.bookingDate = selectedClass.bookingDate;
+                        toolArgs.planName = `${selectedClass.name} ${selectedClass.time}`;
+                        toolArgs.desiredTime = desiredTimeFromContext;
+                    }
+                }
+            }
+            const functionResult = await executeTool(toolCall.function.name, toolArgs);
             console.log(`🛠️ Tool [${toolCall.function.name}] result:`, JSON.stringify(functionResult));
+            if (toolCall.function.name === 'generate_payment_link' && functionResult?.url) {
+                if (toolArgs.paymentType === 'class_booking') {
+                    const scheduleLabel = formatClassTimeLabel(String(toolArgs.desiredTime || extractDesiredTime(String(toolArgs.planName || ''))));
+                    directToolReply = `Listo${clientFirstName ? ` ${clientFirstName}` : ''}. Aqui tienes tu link real para reservar tu clase grupal${scheduleLabel ? ` a las ${scheduleLabel}` : ''}. Son S/ 6 y puedes pagar por Yape o tarjeta en Culqi: ${functionResult.url}`;
+                } else {
+                    directToolReply = `Listo${clientFirstName ? ` ${clientFirstName}` : ''}. Aqui tienes tu link real de pago para la membresia: ${functionResult.url}`;
+                }
+            }
             toolMessages.push({
                 tool_call_id: toolCall.id,
                 role: 'tool',
                 content: JSON.stringify(functionResult)
             });
+        }
+
+        if (directToolReply) {
+            return directToolReply;
         }
 
         const secondResponse = await openai.chat.completions.create({
@@ -665,8 +981,8 @@ export async function processMessage(db: any, phone: string, messageText: string
             ]
         });
 
-        return secondResponse.choices[0].message.content;
+        return sanitizeAssistantReply(secondResponse.choices[0].message.content);
     }
 
-    return responseMessage.content;
+    return sanitizeAssistantReply(responseMessage.content);
 }

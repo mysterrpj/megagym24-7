@@ -1,4 +1,10 @@
-export async function generatePaymentLink(phone: string, planName: string) {
+interface PaymentLinkOptions {
+    paymentType?: 'membership' | 'class_booking';
+    classId?: string;
+    bookingDate?: string;
+}
+
+export async function generatePaymentLink(phone: string, planName: string, options: PaymentLinkOptions = {}) {
     const https = require('https');
     // Access env inside function to be safe
     const CULQI_PRIVATE_KEY = process.env.CULQI_PRIVATE_KEY;
@@ -63,10 +69,15 @@ export async function generatePaymentLink(phone: string, planName: string) {
 
     let amount = 8000;
     const normalizedPlan = planName?.toLowerCase() || '';
+    const paymentType = options.paymentType === 'class_booking' ? 'class_booking' : 'membership';
 
-    if (normalizedPlan.includes('2') || normalizedPlan.includes('dos')) amount = 12000;
-    else if (normalizedPlan.includes('3') || normalizedPlan.includes('tres')) amount = 15000;
-    else if (normalizedPlan.includes('clase')) amount = 2000;
+    if (paymentType === 'class_booking') {
+        amount = 600;
+    } else if (normalizedPlan.includes('2') || normalizedPlan.includes('dos')) {
+        amount = 12000;
+    } else if (normalizedPlan.includes('3') || normalizedPlan.includes('tres')) {
+        amount = 15000;
+    }
 
     const client = {
         first_name: 'Usuario',
@@ -83,7 +94,14 @@ export async function generatePaymentLink(phone: string, planName: string) {
         amount,
         `Plan ${planName || 'Mensual'} - Fit IA`,
         client,
-        { phone: phone, planName: planName, source: 'whatsapp_ai' }
+        {
+            phone: phone,
+            planName: planName,
+            source: 'whatsapp_ai',
+            paymentType,
+            classId: options.classId || '',
+            bookingDate: options.bookingDate || ''
+        }
     );
 
     const orderId = order.id;
@@ -92,5 +110,21 @@ export async function generatePaymentLink(phone: string, planName: string) {
     }
 
     const encodedPlan = encodeURIComponent(planName || 'Plan 1 Mes');
-    return `https://fit-ia-megagym.web.app/pagar?orderId=${orderId}&phone=${encodeURIComponent(phone)}&plan=${encodedPlan}&amount=${amount}`;
+    const query = [
+        `orderId=${orderId}`,
+        `phone=${encodeURIComponent(phone)}`,
+        `plan=${encodedPlan}`,
+        `amount=${amount}`,
+        `paymentType=${paymentType}`
+    ];
+
+    if (options.classId) {
+        query.push(`classId=${encodeURIComponent(options.classId)}`);
+    }
+
+    if (options.bookingDate) {
+        query.push(`bookingDate=${encodeURIComponent(options.bookingDate)}`);
+    }
+
+    return `https://fit-ia-megagym.web.app/pagar?${query.join('&')}`;
 }

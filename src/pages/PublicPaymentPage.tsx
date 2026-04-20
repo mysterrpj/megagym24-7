@@ -1,4 +1,3 @@
-
 import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -20,6 +19,9 @@ export const PublicPaymentPage = () => {
     const phone = searchParams.get('phone') || '';
     const plan = searchParams.get('plan') || 'Plan 1 Mes';
     const amount = parseInt(searchParams.get('amount') || '8000');
+    const paymentType = searchParams.get('paymentType') || 'membership';
+    const classId = searchParams.get('classId') || '';
+    const bookingDate = searchParams.get('bookingDate') || '';
 
     const [loading, setLoading] = useState(true);
     const [processing, setProcessing] = useState(false);
@@ -84,7 +86,17 @@ export const PublicPaymentPage = () => {
                 const response = await fetch('https://us-central1-fit-ia-megagym.cloudfunctions.net/createCulqiCharge', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ token, email: emailRef.current, amount, orderId, phone, planName: plan })
+                    body: JSON.stringify({
+                        token,
+                        email: emailRef.current,
+                        amount,
+                        orderId,
+                        phone,
+                        planName: plan,
+                        paymentType,
+                        classId,
+                        bookingDate
+                    })
                 });
                 const result = await response.json();
                 if (response.ok && result.success) {
@@ -94,7 +106,7 @@ export const PublicPaymentPage = () => {
                     setStatus('ready');
                 }
             } catch (e) {
-                setErrorMessage('Error de conexión. Intenta de nuevo.');
+                setErrorMessage('Error de conexion. Intenta de nuevo.');
                 setStatus('ready');
             } finally {
                 setProcessing(false);
@@ -104,7 +116,7 @@ export const PublicPaymentPage = () => {
 
     const handlePay = () => {
         if (!email) {
-            setErrorMessage('Por favor ingresa tu correo electrónico');
+            setErrorMessage('Por favor ingresa tu correo electronico');
             return;
         }
         setErrorMessage('');
@@ -121,17 +133,21 @@ export const PublicPaymentPage = () => {
                         <div className="mx-auto w-16 h-16 bg-green-500/20 rounded-full flex items-center justify-center mb-4">
                             <span className="text-4xl">✓</span>
                         </div>
-                        <CardTitle className="text-white text-2xl">¡Pago Exitoso!</CardTitle>
+                        <CardTitle className="text-white text-2xl">Pago exitoso</CardTitle>
                     </CardHeader>
                     <CardContent className="text-center space-y-4">
                         <p className="text-zinc-400">
-                            Tu membresía <span className="text-yellow-500 font-bold">{plan}</span> ha sido activada.
+                            {paymentType === 'class_booking'
+                                ? <>Tu reserva para <span className="text-yellow-500 font-bold">{plan}</span> quedo confirmada.</>
+                                : <>Tu membresia <span className="text-yellow-500 font-bold">{plan}</span> ha sido activada.</>}
                         </p>
                         <p className="text-zinc-500 text-sm">
-                            Ya puedes disfrutar de todos los beneficios del gimnasio.
+                            {paymentType === 'class_booking'
+                                ? `Te esperamos ${bookingDate ? `el ${bookingDate}` : 'en tu clase'}.`
+                                : 'Ya puedes disfrutar de todos los beneficios del gimnasio.'}
                         </p>
                         <p className="text-zinc-600 text-xs mt-2">
-                            Puedes cerrar esta pestaña.
+                            Puedes cerrar esta pestana.
                         </p>
                     </CardContent>
                 </Card>
@@ -144,7 +160,7 @@ export const PublicPaymentPage = () => {
             <div className="min-h-screen bg-black flex items-center justify-center p-4">
                 <Card className="w-full max-w-md bg-zinc-900 border-red-500/20">
                     <CardContent className="text-center py-8">
-                        <p className="text-red-500">Error: Link inválido o expirado.</p>
+                        <p className="text-red-500">Error: Link invalido o expirado.</p>
                         <p className="text-zinc-500 text-sm mt-2">Por favor solicita un nuevo enlace de pago.</p>
                     </CardContent>
                 </Card>
@@ -160,22 +176,22 @@ export const PublicPaymentPage = () => {
                     <CardTitle className="text-white text-3xl font-bold tracking-tighter">
                         <span className="text-yellow-500">MEGA</span>GYM
                     </CardTitle>
-                    <p className="text-zinc-400 mt-2">Finalizar Inscripción</p>
+                    <p className="text-zinc-400 mt-2">Finalizar inscripcion</p>
                 </CardHeader>
                 <CardContent className="space-y-6">
                     <div className="p-4 bg-zinc-800/50 rounded-lg border border-zinc-700">
                         <div className="flex justify-between items-center mb-2">
-                            <span className="text-zinc-400">Plan:</span>
+                            <span className="text-zinc-400">{paymentType === 'class_booking' ? 'Clase:' : 'Plan:'}</span>
                             <span className="text-white font-semibold">{plan}</span>
                         </div>
                         <div className="flex justify-between items-center">
-                            <span className="text-zinc-400">Total a Pagar:</span>
+                            <span className="text-zinc-400">Total a pagar:</span>
                             <span className="text-yellow-500 font-bold text-xl">S/ {(amount / 100).toFixed(2)}</span>
                         </div>
                     </div>
 
                     <div className="space-y-2">
-                        <Label htmlFor="email" className="text-zinc-400">Correo electrónico</Label>
+                        <Label htmlFor="email" className="text-zinc-400">Correo electronico</Label>
                         <Input
                             id="email"
                             type="email"
@@ -205,7 +221,7 @@ export const PublicPaymentPage = () => {
                     </Button>
 
                     <p className="text-center text-xs text-zinc-500 mt-4">
-                        Pagos procesados por <span className="text-white font-bold">Culqi</span>. 100% Seguro.
+                        Pagos procesados por <span className="text-white font-bold">Culqi</span>. 100% seguro.
                     </p>
                 </CardContent>
             </Card>
