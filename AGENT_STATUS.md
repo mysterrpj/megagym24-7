@@ -17,6 +17,11 @@ Resumen vigente:
 - El dashboard `Mensajes` ya resuelve nombres reales de clientes.
 - El envío manual desde dashboard quedó desactivado por decisión de producto.
 - El módulo `Clases` ya entró en Fase 1 real con `Firestore` y validaciones de reservas.
+- Las clases grupales pagadas ya usan el mismo checkout de `Culqi`.
+- Las clases grupales reales operativas son `FULLBODY` de lunes a viernes a las `8:30 AM` y `8:00 PM` con `LIZ PIA`.
+- El pase diario de máquinas queda como pago presencial en recepción.
+- `classBookingReminder` ya está activo y no recuerda reservas hechas el mismo día con `2 horas o menos` de anticipación.
+- Sofía ya guarda memoria progresiva del cliente en `trainingProfile` y `assistantMemory`.
 
 ## Qué mirar en lugar de este archivo
 

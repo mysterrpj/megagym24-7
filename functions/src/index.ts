@@ -25,6 +25,41 @@ async function findMemberByPhone(db: any, phone: string) {
     return null;
 }
 
+function getLimaDateString(date = new Date()) {
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Lima',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+    });
+    return formatter.format(date);
+}
+
+function getLimaMinutesSinceMidnight(date = new Date()) {
+    const formatter = new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'America/Lima',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+    });
+    const [hours, minutes] = formatter.format(date).split(':').map(Number);
+    return (hours * 60) + minutes;
+}
+
+function parseClassTimeToMinutes(time: string) {
+    const [hours, minutes] = String(time || '').split(':').map(Number);
+    if (Number.isNaN(hours) || Number.isNaN(minutes)) {
+        return null;
+    }
+    return (hours * 60) + minutes;
+}
+
+function formatClassTimeLabel(time: string) {
+    if (time === '08:30') return '8:30 AM';
+    if (time === '20:00') return '8:00 PM';
+    return String(time || '');
+}
+
 async function createPaidClassBooking(db: any, phone: string, classId: string, bookingDate: string, paymentInfo: any) {
     if (!phone || !classId || !bookingDate) {
         throw new Error('Missing class booking payment data.');
@@ -179,7 +214,7 @@ export const culqiWebhook = functions
 
                         const twilioClientObj = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
                         const firstName = booking.memberName.split(' ')[0];
-                        const classTimeLabel = booking.classTime ? ` a las ${booking.classTime}` : '';
+                        const classTimeLabel = booking.classTime ? ` a las ${formatClassTimeLabel(booking.classTime)}` : '';
                         await twilioClientObj.messages.create({
                             from: 'whatsapp:+51907935299',
                             to: `whatsapp:${booking.phone}`,
@@ -295,7 +330,7 @@ export const createCulqiCharge = functions
 
                         const twilioClientObj = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
                         const firstName = booking.memberName.split(' ')[0];
-                        const classTimeLabel = booking.classTime ? ` a las ${booking.classTime}` : '';
+                        const classTimeLabel = booking.classTime ? ` a las ${formatClassTimeLabel(booking.classTime)}` : '';
                         await twilioClientObj.messages.create({
                             from: 'whatsapp:+51907935299',
                             to: `whatsapp:${booking.phone}`,
@@ -466,6 +501,109 @@ export const membershipReminder = functions
                 console.log(`Debt reminder sent to ${phone} (day ${diffDays})`);
             } catch (e) {
                 console.error(`Error sending debt reminder to ${phone}:`, e);
+            }
+        }
+
+        return null;
+    });
+
+export const classBookingReminder = functions
+    .runWith({ memory: '512MB', timeoutSeconds: 300 })
+    .pubsub.schedule('*/30 * * * *')
+    .timeZone('America/Lima')
+    .onRun(async () => {
+        const adminInner = require('firebase-admin');
+        if (!adminInner.apps.length) adminInner.initializeApp();
+        const db = adminInner.firestore();
+
+        const todayStr = getLimaDateString();
+        const nowMinutes = getLimaMinutesSinceMidnight();
+        const reminderWindowStart = nowMinutes + 90;
+        const reminderWindowEnd = nowMinutes + 150;
+
+        const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+        const FROM = 'whatsapp:+51907935299';
+
+        const bookingsSnap = await db.collection('bookings')
+            .where('date', '==', todayStr)
+            .where('status', '==', 'confirmed')
+            .get();
+
+        for (const bookingDoc of bookingsSnap.docs) {
+            const booking = bookingDoc.data() || {};
+            if (booking.classReminderSentAt) {
+                continue;
+            }
+
+            const classDoc = await db.collection('classes').doc(String(booking.classId || '')).get();
+            if (!classDoc.exists) {
+                continue;
+            }
+
+            const classData = classDoc.data() || {};
+            const classTime = String(classData.time || classData.hour || '');
+            const classTimeMinutes = parseClassTimeToMinutes(classTime);
+            if (classTimeMinutes === null) {
+                continue;
+            }
+
+            const bookingCreatedAt = booking.created_at?.toDate?.();
+            if (bookingCreatedAt) {
+                const bookingCreatedDate = getLimaDateString(bookingCreatedAt);
+                const bookingCreatedMinutes = getLimaMinutesSinceMidnight(bookingCreatedAt);
+                const minutesBetweenBookingAndClass = classTimeMinutes - bookingCreatedMinutes;
+
+                // Skip reminders for late same-day bookings made within the previous 2 hours.
+                if (bookingCreatedDate === todayStr && minutesBetweenBookingAndClass <= 120) {
+                    continue;
+                }
+            }
+
+            if (classTimeMinutes < reminderWindowStart || classTimeMinutes > reminderWindowEnd) {
+                continue;
+            }
+
+            const memberDoc = booking.memberId
+                ? await db.collection('members').doc(String(booking.memberId)).get()
+                : null;
+
+            if (!memberDoc?.exists) {
+                continue;
+            }
+
+            const member = memberDoc.data() || {};
+            const phone = member.phone;
+            if (!phone) {
+                continue;
+            }
+
+            const firstName = String(member.name || 'amigo').split(' ')[0];
+            const className = classData.name || 'FULLBODY';
+            const instructor = classData.instructor || 'LIZ PIA';
+            const msg = `¡Hola ${firstName}! 😊 Te recordamos tu clase de ${className} con ${instructor} hoy a las ${formatClassTimeLabel(classTime)}. Te esperamos en MegaGym 💪`;
+
+            try {
+                await twilioClient.messages.create({
+                    from: FROM,
+                    to: `whatsapp:${phone}`,
+                    body: msg
+                });
+
+                await db.collection('messages').add({
+                    phone,
+                    content: msg,
+                    direction: 'outbound',
+                    timestamp: adminInner.firestore.FieldValue.serverTimestamp(),
+                    source: 'scheduled_class_booking_reminder'
+                });
+
+                await bookingDoc.ref.update({
+                    classReminderSentAt: adminInner.firestore.FieldValue.serverTimestamp()
+                });
+
+                console.log(`Class reminder sent to ${phone} for booking ${bookingDoc.id}`);
+            } catch (e) {
+                console.error(`Error sending class reminder for booking ${bookingDoc.id}:`, e);
             }
         }
 

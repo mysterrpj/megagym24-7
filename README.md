@@ -26,6 +26,8 @@ URL actual:
 - Envío de voucher/comprobante
 - Transcripción de audios de WhatsApp
 - Módulo de clases conectado a Firestore
+- Reserva pagada de clases grupales por WhatsApp
+- Memoria progresiva y personalización del bot por cliente
 
 ## Módulo de clases
 
@@ -35,12 +37,35 @@ Actualmente:
 - crear una clase desde el panel ya guarda en Firestore;
 - el bot puede consultar clases y reservar;
 - las reservas validan duplicados y cupos;
+- las clases grupales reales operativas son `FULLBODY` de lunes a viernes a las `8:30 AM` y `8:00 PM` con `LIZ PIA`;
+- las clases grupales se pagan aparte de la membresía por `S/ 6` vía `Culqi`;
+- el bot distingue entre membresía, clase grupal y pase diario de máquinas en recepción;
+- existe `classBookingReminder` para recordar clases grupales confirmadas;
+- ese recordatorio no se envía si la reserva se hizo el mismo día y faltaban `2 horas o menos` para la clase;
 - si `classes` está vacío, el dashboard muestra una vista demo coherente para que no aparezca todo en cero.
+
+## Memoria del bot
+
+Sofía ya empezó a guardar memoria útil del cliente de forma progresiva en `members`:
+
+- datos del `trainingProfile`:
+  - `objetivo`
+  - `nivel`
+  - `diasSemana`
+  - `limitaciones`
+  - `horarioHabitual`
+  - `preferenciaClases`
+  - `constancia`
+  - `estadoMotivacional`
+- memoria conversacional breve en `assistantMemory`:
+  - `ultimaInteraccionClave`
+  - `ultimaInteraccionTexto`
+
+La idea es que no pregunte todo de golpe, sino que complete el perfil poco a poco mientras conversa.
 
 Pendiente:
 
 - cancelación de reservas;
-- recordatorios automáticos de clase;
 - asistencia / no-show;
 - lista de espera o reprogramación.
 

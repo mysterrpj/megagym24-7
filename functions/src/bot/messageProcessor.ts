@@ -199,6 +199,141 @@ function assistantPromisedPaymentLink(text: string) {
         .some((token) => normalized.includes(token));
 }
 
+function extractDaysPerWeek(text: string) {
+    const normalized = normalizeText(text);
+    const digitMatch = normalized.match(/\b([1-7])\b/);
+    if (digitMatch) return Number(digitMatch[1]);
+
+    const numberWords: Record<string, number> = {
+        'uno': 1,
+        'una': 1,
+        'dos': 2,
+        'tres': 3,
+        'cuatro': 4,
+        'cinco': 5,
+        'seis': 6,
+        'siete': 7
+    };
+
+    for (const [word, value] of Object.entries(numberWords)) {
+        if (normalized.includes(`${word} dias`) || normalized.includes(`${word} veces`)) {
+            return value;
+        }
+    }
+
+    return undefined;
+}
+
+function extractTrainingProfileSignals(text: string) {
+    const normalized = normalizeText(text);
+    const fields: any = {};
+
+    if (normalized.includes('bajar de peso') || normalized.includes('bajar peso') || normalized.includes('perder grasa') || normalized.includes('bajar grasa') || normalized.includes('adelgazar')) {
+        fields.objetivo = 'bajar grasa';
+    } else if (normalized.includes('ganar masa') || normalized.includes('masa muscular') || normalized.includes('ganar musculo') || normalized.includes('subir masa')) {
+        fields.objetivo = 'ganar masa muscular';
+    } else if (normalized.includes('tonificar') || normalized.includes('definir')) {
+        fields.objetivo = 'tonificar';
+    } else if (normalized.includes('retomar') || normalized.includes('volver a entrenar') || normalized.includes('volver al gym')) {
+        fields.objetivo = 'retomar entrenamiento';
+    }
+
+    if (normalized.includes('principiante')) fields.nivel = 'principiante';
+    else if (normalized.includes('intermedio')) fields.nivel = 'intermedio';
+    else if (normalized.includes('avanzado')) fields.nivel = 'avanzado';
+
+    const diasSemana = extractDaysPerWeek(text);
+    if (diasSemana) fields.diasSemana = diasSemana;
+
+    if (normalized.includes('rodilla') || normalized.includes('hombro') || normalized.includes('espalda') || normalized.includes('cuello') || normalized.includes('lesion') || normalized.includes('dolor') || normalized.includes('molestia')) {
+        fields.limitaciones = text.trim();
+    }
+
+    if (normalized.includes('en la manana') || normalized.includes('por la manana') || normalized.includes('mañana me queda mejor') || normalized.includes('en la mañana')) {
+        fields.horarioHabitual = 'mañana';
+    } else if (normalized.includes('en la noche') || normalized.includes('por la noche') || normalized.includes('en la tarde') || normalized.includes('solo puedo en la noche') || normalized.includes('salgo tarde del trabajo')) {
+        fields.horarioHabitual = 'noche';
+    }
+
+    if (normalized.includes('clase grupal') || normalized.includes('aerobico') || normalized.includes('aerobicos') || normalized.includes('fullbody')) {
+        fields.preferenciaClases = 'clases grupales';
+    } else if (normalized.includes('maquina') || normalized.includes('maquinas')) {
+        fields.preferenciaClases = 'máquinas';
+    }
+
+    if (normalized.includes('me cuesta ser constante') || normalized.includes('me desordeno') || normalized.includes('a veces dejo de venir') || normalized.includes('me falta constancia')) {
+        fields.constancia = 'intermitente';
+    } else if (normalized.includes('soy constante') || normalized.includes('vengo seguido') || normalized.includes('entreno siempre')) {
+        fields.constancia = 'constante';
+    }
+
+    if (normalized.includes('motivad') || normalized.includes('con ganas') || normalized.includes('a meterle')) {
+        fields.estadoMotivacional = 'motivado';
+    } else if (normalized.includes('desanim') || normalized.includes('frustrad') || normalized.includes('me cuesta volver') || normalized.includes('he subido de peso')) {
+        fields.estadoMotivacional = 'retomando';
+    }
+
+    return fields;
+}
+
+function classifyImportantInteraction(text: string) {
+    const normalized = normalizeText(text);
+    if (mentionsGroupClassContext(text) && mentionsPaymentIntent(text)) return 'Pidió pagar una clase grupal';
+    if (mentionsGroupClassContext(text) && mentionsReservationIntent(text)) return 'Pidió reservar una clase grupal';
+    if (normalized.includes('rutina')) return 'Pidió su rutina';
+    if (normalized.includes('dieta')) return 'Pidió su dieta';
+    if (normalized.includes('pagar') || normalized.includes('renovar')) return 'Mostró intención de pago o renovación';
+    if (normalized.includes('no puedo ir') || normalized.includes('no podre ir')) return 'Avisó que no podrá asistir';
+    return '';
+}
+
+async function saveClientMemory(db: any, adminInner: any, phone: string, messageText: string) {
+    const snap = await findMember(db, phone);
+    if (!snap || snap.empty) return null;
+
+    const doc = snap.docs[0];
+    const currentData = doc.data() || {};
+    const currentProfile = currentData.trainingProfile || {};
+    const extractedFields = extractTrainingProfileSignals(messageText);
+    const importantInteraction = classifyImportantInteraction(messageText);
+    const updatePayload: any = {};
+
+    if (Object.keys(extractedFields).length > 0) {
+        updatePayload.trainingProfile = {
+            ...currentProfile,
+            ...extractedFields,
+            lastProfileUpdateAt: adminInner.firestore.FieldValue.serverTimestamp()
+        };
+    }
+
+    if (importantInteraction) {
+        updatePayload.assistantMemory = {
+            ...(currentData.assistantMemory || {}),
+            ultimaInteraccionClave: importantInteraction,
+            ultimaInteraccionTexto: String(messageText || '').trim().slice(0, 220),
+            updatedAt: adminInner.firestore.FieldValue.serverTimestamp()
+        };
+    }
+
+    if (Object.keys(updatePayload).length > 0) {
+        await doc.ref.set(updatePayload, { merge: true });
+    }
+
+    return {
+        profile: {
+            ...currentProfile,
+            ...extractedFields
+        },
+        memory: {
+            ...(currentData.assistantMemory || {}),
+            ...(importantInteraction ? {
+                ultimaInteraccionClave: importantInteraction,
+                ultimaInteraccionTexto: String(messageText || '').trim().slice(0, 220)
+            } : {})
+        }
+    };
+}
+
 async function reserveClass(db: any, adminInner: any, args: any) {
     const memSnap = await findMember(db, args.phone);
     if (!memSnap) return { error: "Member not found" };
@@ -574,6 +709,8 @@ export async function executeTool(name: string, args: any) {
 
 export async function processMessage(db: any, phone: string, messageText: string) {
     const OpenAI = require('openai');
+    const adminInner = require('firebase-admin');
+    if (!adminInner.apps.length) adminInner.initializeApp();
     const openai = new OpenAI({
         apiKey: process.env.OPENAI_API_KEY || 'placeholder-key'
     });
@@ -707,12 +844,16 @@ export async function processMessage(db: any, phone: string, messageText: string
                         phone: { type: "string", description: "El número de teléfono del usuario." },
                         fields: {
                             type: "object",
-                            description: "Campos a guardar. Puede incluir: objetivo, nivel, diasSemana, limitaciones",
+                            description: "Campos a guardar. Puede incluir: objetivo, nivel, diasSemana, limitaciones, horarioHabitual, preferenciaClases, constancia, estadoMotivacional",
                             properties: {
                                 objetivo: { type: "string" },
                                 nivel: { type: "string" },
                                 diasSemana: { type: "number" },
-                                limitaciones: { type: "string" }
+                                limitaciones: { type: "string" },
+                                horarioHabitual: { type: "string" },
+                                preferenciaClases: { type: "string" },
+                                constancia: { type: "string" },
+                                estadoMotivacional: { type: "string" }
                             }
                         }
                     },
@@ -752,17 +893,22 @@ export async function processMessage(db: any, phone: string, messageText: string
 
     const memberDoc = await findMember(db, phone);
     let customerContext = "Prospecto o cliente no registrado.";
+    let memoryContext = "Sin memoria conversacional relevante todavía.";
     let profileQuestion: string | null = null;
     let daysUntilExpiry: number | null = null;
     let daysOverdue: number | null = null;  // días transcurridos desde el vencimiento (positivo = vencido)
     let clientFirstName = '';
+    const savedMemory = await saveClientMemory(db, adminInner, phone, messageText);
+    if (savedMemory?.memory?.ultimaInteraccionClave) {
+        memoryContext = `Ultima interaccion clave: ${savedMemory.memory.ultimaInteraccionClave}. Ultimo detalle relevante: ${savedMemory.memory.ultimaInteraccionTexto || 'N/A'}.`;
+    }
 
     if (memberDoc && !memberDoc.empty) {
         const data = memberDoc.docs[0].data();
         clientFirstName = (data.name || '').split(' ')[0];
 
         // Perfil de entrenamiento
-        const profile = data.trainingProfile || {};
+        const profile = savedMemory?.profile || data.trainingProfile || {};
         const profileStep = data.profileStep || 0;
 
         // Calcular días hasta vencimiento (negativo = ya venció)
@@ -785,10 +931,12 @@ export async function processMessage(db: any, phone: string, messageText: string
             if (!profile.objetivo) profileQuestion = `Por cierto${clientFirstName ? ` ${clientFirstName}` : ''}, ¿cuál es tu objetivo principal en el gym? (bajar de peso, ganar músculo, tonificar...) Eso me ayudará a darte recomendaciones más precisas. 😉`;
             else if (!profile.nivel) profileQuestion = `¿Te consideras principiante, intermedio o avanzado en el entrenamiento? 💪`;
             else if (!profile.diasSemana) profileQuestion = `¿Cuántos días a la semana puedes venir a entrenar para armar algo realista? 🔥`;
+            else if (!profile.horarioHabitual) profileQuestion = `¿Sueles entrenar más en la mañana o en la noche? Así te acompaño mejor según tu ritmo. 😉`;
+            else if (!profile.limitaciones) profileQuestion = `¿Tienes alguna molestia o lesión que deba considerar para cuidarte mejor al recomendarte cosas?`;
         }
 
         const hasDiet = data.diet ? 'Sí (asignada)' : 'No (sin asignar)';
-        customerContext = `CLIENTE REGISTRADO: Nombre: ${data.name || 'N/A'}. DNI: ${data.dni || 'N/A'}. Email: ${data.email || 'N/A'}. Plan: ${data.plan || 'sin plan'}. Estado: ${data.status || 'prospect'}. Vence: ${data.endDate || 'N/A'}. Días vencido: ${daysOverdue !== null ? daysOverdue : 'N/A (activo)'}. Dieta Asignada: ${hasDiet}. Perfil Entrenamiento: ${profileStr}`;
+        customerContext = `CLIENTE REGISTRADO: Nombre: ${data.name || 'N/A'}. DNI: ${data.dni || 'N/A'}. Email: ${data.email || 'N/A'}. Plan: ${data.plan || 'sin plan'}. Estado: ${data.status || 'prospect'}. Vence: ${data.endDate || 'N/A'}. Días vencido: ${daysOverdue !== null ? daysOverdue : 'N/A (activo)'}. Dieta Asignada: ${hasDiet}. Perfil Entrenamiento: ${profileStr}. Horario habitual: ${profile.horarioHabitual || 'N/A'}. Preferencia: ${profile.preferenciaClases || 'N/A'}. Constancia: ${profile.constancia || 'N/A'}. Estado motivacional: ${profile.estadoMotivacional || 'N/A'}.`;
     }
 
     const historySnapshot = await db.collection('messages')
@@ -890,6 +1038,7 @@ export async function processMessage(db: any, phone: string, messageText: string
     - Fecha/Hora actual: ${currentDay} ${currentDate}, ${currentTime} (hora de Lima, Perú).
     - Teléfono del cliente: ${phone}. 
     - Info del cliente: ${customerContext}
+    - Memoria Ãºtil del cliente: ${memoryContext}
 
     TU MISIÓN:
     1. Si te preguntan "¿Está abierto?" o sobre el horario, usa la hora actual (${currentTime}) y el día (${currentDay}) para responder con precisión.
@@ -910,14 +1059,16 @@ export async function processMessage(db: any, phone: string, messageText: string
        - Cuando generes link de membresía, responde con entusiasmo como antes. Cuando generes link de clase grupal, deja claro que es sólo para clases grupales y no para clase libre de máquinas.
        - Si el cliente todavía no te dijo día u hora de la clase grupal, NO generes el link todavía. Primero aclara si quiere 8:30 AM u 8:00 PM.
     6. Si pide su rutina, usa 'get_student_routine' (solo si daysOverdue < 20). Si pide su dieta, usa 'get_student_diet' (solo si daysOverdue < 20).
-    7. Si responde a tus preguntas de perfil (objetivo, nivel, etc.), usa 'update_member_profile' inmediatamente.
-    8. ENTREGA DE DIETA (NIVEL EXPERTO): Cuando uses 'get_student_diet', NUNCA envíes todo el plan de golpe. Sigue esta lógica exacta:
+    7. Si responde a tus preguntas de perfil (objetivo, nivel, horario, limitaciones, etc.), usa 'update_member_profile' inmediatamente.
+    8. Usa la memoria del cliente para responder de forma personal, pero natural. No enumeres su perfil como expediente ni digas "recuerdo que...". Úsala con tacto.
+    9. Completa el perfil poco a poco, nunca como interrogatorio. Solo pregunta un dato faltante cuando ayude de verdad a acompañarlo mejor.
+    10. ENTREGA DE DIETA (NIVEL EXPERTO): Cuando uses 'get_student_diet', NUNCA envíes todo el plan de golpe. Sigue esta lógica exacta:
        a) Usa el día actual (${currentDay}) para identificar qué grupo de días del plan corresponde HOY. Regla general para planes semanales de 3 grupos: Lunes/Martes/Miércoles → Días 1-3, Jueves/Viernes → Días 4-5, Sábado/Domingo → Días 6-7.
        b) Menciona proactivamente a qué fase/grupo pertenece hoy y su nombre de la dieta (ej. "Alta Rendimiento", "Variación Metabólica", "Bajo en Carbs").
        c) Pregúntale qué comida quiere ver ahora (Desayuno, Almuerzo o Cena) o si prefiere ver también la suplementación.
        d) EJEMPLO de respuesta ideal: "¡Hola Robert! 💪 Hoy es ${currentDay}, que corresponde a tu fase de *Variación Metabólica* (Días 4-5). ¿Quieres ver tu almuerzo de hoy o la suplementación pre-entreno? 🍗"
        e) Entrega las porciones de forma interactiva y con emojis de alimentos (🍗🥑🍳🥩).
-    9. ESTILO DE RESPUESTA - REGLAS DE ORO:
+    11. ESTILO DE RESPUESTA - REGLAS DE ORO:
        - SIEMPRE responde como si fueras una amiga mandando un WhatsApp, no como un blog ni un manual.
        - NUNCA uses negritas (*texto*) para subtítulos ni títulos dentro de la respuesta. Las negritas solo están permitidas para resaltar UNA palabra clave importante, no para crear estructura tipo artículo.
        - NUNCA uses listas numeradas. Si necesitas listar cosas, usa máximo 3 ítems con emojis como viñetas.

@@ -15,14 +15,19 @@ Lo que ya está operativo:
 - historial de mensajes y recordatorios visible en dashboard;
 - módulo de clases en Fase 1 conectado a `Firestore`;
 - validación de cupos y duplicados en reservas del bot ya implementada;
+- pago por clase grupal (`class_booking`) ya operativo en producción;
+- clases grupales reales cargadas: `FULLBODY` de lunes a viernes a las `8:30 AM` y `8:00 PM` con `LIZ PIA`;
+- recordatorios automáticos de clase ya activos;
+- el recordatorio de clase se omite si la reserva fue hecha el mismo día con `2 horas o menos` de anticipación;
+- memoria progresiva del cliente ya integrada en Sofía;
 - vista demo de clases activa cuando `classes` está vacía.
 
 Pendientes vivos, pero fuera de este roadmap histórico:
 
 - cancelación de reservas de clases;
-- recordatorios automáticos de clase;
 - asistencia / no-show;
 - lista de espera o reprogramación;
+- profundizar el uso de memoria del cliente para progreso, adherencia y riesgo de abandono;
 - migración futura de `functions.config()` y runtime `Node.js 20`.
 
 ---

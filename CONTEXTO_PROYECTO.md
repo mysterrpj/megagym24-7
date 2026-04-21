@@ -248,3 +248,68 @@ TodavÃ­a faltan estas piezas para dejar el sistema de clases maduro:
 - migrar desde `functions.config()` a params antes de marzo 2027;
 - actualizar runtime de `Node.js 20`;
 - revisar actualizaciÃ³n de `firebase-functions`.
+## Actualización Complementaria (2026-04-20)
+
+### Clases grupales pagadas operativas
+
+- clases reales cargadas en `classes`:
+  - `FULLBODY`
+  - lunes a viernes
+  - `8:30 AM` y `8:00 PM`
+  - instructora `LIZ PIA`
+  - precio `S/ 6`
+- el bot distingue entre:
+  - `membresía` → genera link de membresía;
+  - `clase grupal / aeróbicos / FULLBODY` → genera link `class_booking`;
+  - `clase libre de máquinas / pase por día` → no genera link; ese pago se hace en recepción.
+- el pago de clase grupal usa el mismo checkout de `Culqi`:
+  - el cliente puede pagar por `Yape` o `tarjeta` dentro del mismo flujo;
+  - al aprobarse el pago, se crea una reserva real en `bookings` con `status: confirmed`.
+- las clases grupales están abiertas al público general que escriba al bot y pague, no solo a miembros activos.
+
+### Recordatorios automáticos de clases grupales
+
+- existe `classBookingReminder`;
+- corre cada `30 minutos` en horario `America/Lima`;
+- revisa reservas `confirmed` del día actual;
+- recuerda la clase cuando faltan entre `90` y `150` minutos para el inicio;
+- guarda el recordatorio en `messages` con `source: scheduled_class_booking_reminder`;
+- marca `classReminderSentAt` para no repetir el recordatorio;
+- si la reserva fue hecha el mismo día y faltaban `2 horas o menos` para la clase, no se envía recordatorio.
+## Actualización Complementaria (2026-04-21)
+
+### Memoria progresiva y personalización de Sofía
+
+Desde 2026-04-21, `messageProcessor.ts` ya empezó a guardar memoria útil del cliente de forma progresiva dentro de `members`.
+
+Campos aprovechados dentro de `trainingProfile`:
+
+- `objetivo`
+- `nivel`
+- `diasSemana`
+- `limitaciones`
+- `horarioHabitual`
+- `preferenciaClases`
+- `constancia`
+- `estadoMotivacional`
+
+Memoria conversacional breve:
+
+- `assistantMemory.ultimaInteraccionClave`
+- `assistantMemory.ultimaInteraccionTexto`
+
+Reglas actuales de funcionamiento:
+
+- Sofía no debe pedir todo como formulario.
+- Completa el perfil poco a poco mientras conversa.
+- Usa esa memoria en el prompt para responder de forma más personal.
+- Ya puede preguntar también por:
+  - horario habitual
+  - molestias o lesiones
+- La memoria nueva no reemplaza pagos, clases ni recordatorios; se suma a esos flujos.
+
+Pendiente de esta línea de trabajo:
+
+- profundizar progreso, adherencia, recaídas y riesgo de abandono;
+- definir mejor cuándo actualizar o sobrescribir memoria vieja;
+- decidir si algunos datos deben mostrarse o editarse también desde el dashboard.
