@@ -1,5 +1,21 @@
 # MegaGym 24/7 - Contexto y Arquitectura del Proyecto
 
+## Actualizacion Operativa (2026-04-21) - Mensajes minimalista
+
+La pantalla `Mensajes` queda como una vista minimalista de supervision e historial, no como CRM operativo.
+
+Estado actual:
+
+- lista de conversaciones a la izquierda;
+- historial de chat al centro;
+- nombres reales resueltos desde `members` por telefono normalizado;
+- aviso inferior indicando que las respuestas se envian automaticamente desde el bot;
+- sin ficha rapida lateral;
+- sin envio manual desde dashboard;
+- sin botones de accion CRM.
+
+Razon: el propietario no atiende manualmente desde el panel; el bot Sofia se encarga de responder, cobrar, reservar y recordar. Se probo una ficha rapida lateral, pero fue retirada para mantener la pantalla limpia y evitar confusion.
+
 Este documento sirve como la fuente principal de la verdad (SoT) para la arquitectura, configuración y reglas de negocio del bot de WhatsApp de MegaGym. **Cualquier Inteligencia Artificial que asista en este proyecto DEBE leer y respetar este documento antes de proponer o realizar cambios en el bot.**
 
 ## Arquitectura General
