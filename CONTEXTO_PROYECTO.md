@@ -83,7 +83,7 @@ El proyecto es un sistema para la gestión de un gimnasio ("MegaGym") con un bot
 | `phone` | string | Teléfono (formato +51XXXXXXXXX) |
 | `email` | string | Email |
 | `dni` | string | DNI |
-| `plan` | string | Nombre del plan (ej. "Membresía Fit 2026") |
+| `plan` | string | Nombre del plan (ej. "Plan Mensual") |
 | `status` | string | `active`, `pending`, `overdue`, `prospect` |
 | `startDate` | string | Fecha de inicio (YYYY-MM-DD) |
 | `endDate` | string | Fecha de fin (YYYY-MM-DD) |
@@ -109,7 +109,7 @@ El proyecto es un sistema para la gestión de un gimnasio ("MegaGym") con un bot
 
 *   **Dirección**: Mz I Lt 5 Montenegro, San Juan de Lurigancho.
 *   **Horarios**: Lunes a Viernes (6am-10pm), Sábados (6am-6pm), Domingos (6am-12pm).
-*   **Precios**: 1 Mes (S/80), 2 Meses (S/120), 3 Meses (S/150). Clase suelta (S/6).
+*   **Precios**: 1 Mes (S/70), 2 Meses (S/120), 3 Meses promocion (S/150). Clase suelta (S/6).
 
 ## Regla Crítica: Cálculo de Deuda en el Voucher (`send_payment_voucher`)
 
@@ -308,6 +308,17 @@ Campos aprovechados dentro de `trainingProfile`:
 - `preferenciaClases`
 - `constancia`
 - `estadoMotivacional`
+- `ultimaRutinaReportada`
+- `adherenciaEntrenamiento`
+- `ejercicioDificil`
+- `progresoReportado`
+- `molestiaEntrenando`
+- `riesgoAbandono`
+- `adherenciaNutricional`
+- `dificultadNutricional`
+- `comidaProblematica`
+- `patronRecaida`
+- `preferenciasAlimentarias`
 
 Memoria conversacional breve:
 
@@ -322,10 +333,32 @@ Reglas actuales de funcionamiento:
 - Ya puede preguntar también por:
   - horario habitual
   - molestias o lesiones
+- Ya puede guardar señales ligeras de entrenamiento cuando el cliente menciona rutina hecha, faltas, progreso, ejercicio difícil o molestia.
+- Ya puede guardar señales nutricionales ligeras cuando el cliente menciona dificultad con dieta, antojos, ansiedad, comidas que se salta o preferencias alimentarias.
 - La memoria nueva no reemplaza pagos, clases ni recordatorios; se suma a esos flujos.
 
 Pendiente de esta línea de trabajo:
 
-- profundizar progreso, adherencia, recaídas y riesgo de abandono;
+- profundizar progreso y riesgo de abandono;
 - definir mejor cuándo actualizar o sobrescribir memoria vieja;
 - decidir si algunos datos deben mostrarse o editarse también desde el dashboard.
+
+### Pendiente futuro - Nutricion
+
+No implementar todavia. Retomar mas adelante cuando el seguimiento ligero ya haya sido probado con clientes reales.
+
+- Mostrar en el dashboard los campos nutricionales guardados en `trainingProfile`.
+- Crear seguimiento semanal simple de adherencia nutricional.
+- Evaluar check-ins automaticos de nutricion por WhatsApp.
+- Guardar historial por fecha solo si realmente se usara para seguimiento.
+- Mantener la dieta base como plan manual pegado por el administrador; Sofia acompana y personaliza, no reemplaza al entrenador/nutricionista.
+
+### Pendiente futuro - Rutinas
+
+No implementar todavia. Por ahora Sofia solo guarda seguimiento ligero para ayudar a entender rutinas y acompanar mejor.
+
+- Registro avanzado de rutinas con series, pesos y repeticiones.
+- Historial por ejercicio y fecha.
+- Medicion de progreso por carga, repeticiones o cumplimiento.
+- Vista en dashboard para que el entrenador revise avances y ejercicios problematicos.
+- Alertas o resumen para detectar alumnos estancados o con riesgo de abandono.

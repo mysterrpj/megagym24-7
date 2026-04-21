@@ -273,6 +273,77 @@ function extractTrainingProfileSignals(text: string) {
         fields.estadoMotivacional = 'retomando';
     }
 
+    if (normalized.includes('entrene pierna') || normalized.includes('hice pierna') || normalized.includes('rutina de pierna')) {
+        fields.ultimaRutinaReportada = 'pierna';
+        fields.adherenciaEntrenamiento = 'reporto entrenamiento';
+    } else if (normalized.includes('entrene pecho') || normalized.includes('hice pecho') || normalized.includes('rutina de pecho')) {
+        fields.ultimaRutinaReportada = 'pecho';
+        fields.adherenciaEntrenamiento = 'reporto entrenamiento';
+    } else if (normalized.includes('entrene espalda') || normalized.includes('hice espalda') || normalized.includes('rutina de espalda')) {
+        fields.ultimaRutinaReportada = 'espalda';
+        fields.adherenciaEntrenamiento = 'reporto entrenamiento';
+    } else if (normalized.includes('entrene brazos') || normalized.includes('hice brazos') || normalized.includes('rutina de brazos')) {
+        fields.ultimaRutinaReportada = 'brazos';
+        fields.adherenciaEntrenamiento = 'reporto entrenamiento';
+    } else if (normalized.includes('entrene hoy') || normalized.includes('hice mi rutina') || normalized.includes('termine mi rutina') || normalized.includes('complete mi rutina')) {
+        fields.adherenciaEntrenamiento = 'buena';
+    }
+
+    if (normalized.includes('no fui esta semana') || normalized.includes('solo fui un dia') || normalized.includes('solo fui 1 dia') || normalized.includes('no pude ir al gym') || normalized.includes('falte al gym')) {
+        fields.adherenciaEntrenamiento = 'baja';
+        fields.riesgoAbandono = 'medio';
+    } else if (normalized.includes('estoy yendo seguido') || normalized.includes('estoy constante') || normalized.includes('fui tres veces') || normalized.includes('fui 3 veces') || normalized.includes('entrene toda la semana')) {
+        fields.adherenciaEntrenamiento = 'buena';
+        fields.riesgoAbandono = 'bajo';
+    }
+
+    if (normalized.includes('no pude terminar') || normalized.includes('no termine la rutina') || normalized.includes('me cuesta la rutina') || normalized.includes('me cuesta terminar')) {
+        fields.adherenciaEntrenamiento = 'parcial';
+        fields.ejercicioDificil = text.trim();
+    }
+
+    if (normalized.includes('me cuesta sentadilla') || normalized.includes('sentadilla me cuesta') || normalized.includes('me cuesta press') || normalized.includes('me cuesta banca') || normalized.includes('me cuesta peso muerto') || normalized.includes('me cuesta remo') || normalized.includes('me cuesta dominada')) {
+        fields.ejercicioDificil = text.trim();
+    }
+
+    if (normalized.includes('subi peso') || normalized.includes('subi de peso en') || normalized.includes('aumente peso') || normalized.includes('levante mas') || normalized.includes('hice mas repeticiones') || normalized.includes('mejoré') || normalized.includes('mejore')) {
+        fields.progresoReportado = text.trim();
+        fields.adherenciaEntrenamiento = 'progresando';
+    }
+
+    if (normalized.includes('dolor entrenando') || normalized.includes('me dolio entrenando') || normalized.includes('me duele cuando entreno') || normalized.includes('me molesta cuando hago') || normalized.includes('me dolio la rodilla') || normalized.includes('me dolio el hombro') || normalized.includes('me dolio la espalda')) {
+        fields.molestiaEntrenando = text.trim();
+    }
+
+    if (normalized.includes('me cuesta la dieta') || normalized.includes('no puedo hacer la dieta') || normalized.includes('se me complica la dieta') || normalized.includes('me desordeno con la comida') || normalized.includes('como mal')) {
+        fields.adherenciaNutricional = 'intermitente';
+        fields.dificultadNutricional = text.trim();
+    } else if (normalized.includes('estoy cumpliendo la dieta') || normalized.includes('voy bien con la dieta') || normalized.includes('sigo mi dieta') || normalized.includes('estoy comiendo bien')) {
+        fields.adherenciaNutricional = 'buena';
+    }
+
+    if (normalized.includes('me salto el desayuno') || normalized.includes('no desayuno')) {
+        fields.comidaProblematica = 'desayuno';
+    } else if (normalized.includes('me salto el almuerzo') || normalized.includes('no almuerzo')) {
+        fields.comidaProblematica = 'almuerzo';
+    } else if (normalized.includes('me salto la cena') || normalized.includes('no ceno') || normalized.includes('ceno mal')) {
+        fields.comidaProblematica = 'cena';
+    } else if (normalized.includes('me cuesta la cena') || normalized.includes('en la noche como mal') || normalized.includes('de noche me da hambre')) {
+        fields.comidaProblematica = 'noche';
+    }
+
+    if (normalized.includes('ansiedad') || normalized.includes('antojo') || normalized.includes('dulce') || normalized.includes('gaseosa') || normalized.includes('pan') || normalized.includes('comida chatarra')) {
+        fields.patronRecaida = text.trim();
+    }
+
+    if (normalized.includes('como fuera') || normalized.includes('almuerzo en la calle') || normalized.includes('trabajo todo el dia') || normalized.includes('no tengo tiempo para cocinar')) {
+        fields.dificultadNutricional = text.trim();
+    }
+
+    if (normalized.includes('no como pollo') || normalized.includes('no me gusta el pollo') || normalized.includes('no como pescado') || normalized.includes('no me gusta el pescado') || normalized.includes('soy vegetariano') || normalized.includes('soy vegetariana') || normalized.includes('intolerante') || normalized.includes('alergia')) {
+        fields.preferenciasAlimentarias = text.trim();
+    }
+
     return fields;
 }
 
@@ -837,14 +908,14 @@ export async function processMessage(db: any, phone: string, messageText: string
             type: "function",
             function: {
                 name: "update_member_profile",
-                description: "Guardar en el perfil del cliente la información que él mismo te proporcionó (objetivo, nivel, días disponibles, limitaciones). Úsalo cuando el cliente responda preguntas sobre su entrenamiento.",
+                description: "Guardar en el perfil del cliente la información que él mismo te proporcionó sobre entrenamiento, horarios, constancia o nutrición. Úsalo cuando el cliente comparta datos útiles para personalizar el acompañamiento.",
                 parameters: {
                     type: "object",
                     properties: {
                         phone: { type: "string", description: "El número de teléfono del usuario." },
                         fields: {
                             type: "object",
-                            description: "Campos a guardar. Puede incluir: objetivo, nivel, diasSemana, limitaciones, horarioHabitual, preferenciaClases, constancia, estadoMotivacional",
+                            description: "Campos a guardar. Puede incluir: objetivo, nivel, diasSemana, limitaciones, horarioHabitual, preferenciaClases, constancia, estadoMotivacional, ultimaRutinaReportada, adherenciaEntrenamiento, ejercicioDificil, progresoReportado, molestiaEntrenando, riesgoAbandono, adherenciaNutricional, dificultadNutricional, comidaProblematica, patronRecaida, preferenciasAlimentarias",
                             properties: {
                                 objetivo: { type: "string" },
                                 nivel: { type: "string" },
@@ -853,7 +924,18 @@ export async function processMessage(db: any, phone: string, messageText: string
                                 horarioHabitual: { type: "string" },
                                 preferenciaClases: { type: "string" },
                                 constancia: { type: "string" },
-                                estadoMotivacional: { type: "string" }
+                                estadoMotivacional: { type: "string" },
+                                ultimaRutinaReportada: { type: "string" },
+                                adherenciaEntrenamiento: { type: "string" },
+                                ejercicioDificil: { type: "string" },
+                                progresoReportado: { type: "string" },
+                                molestiaEntrenando: { type: "string" },
+                                riesgoAbandono: { type: "string" },
+                                adherenciaNutricional: { type: "string" },
+                                dificultadNutricional: { type: "string" },
+                                comidaProblematica: { type: "string" },
+                                patronRecaida: { type: "string" },
+                                preferenciasAlimentarias: { type: "string" }
                             }
                         }
                     },
@@ -925,6 +1007,8 @@ export async function processMessage(db: any, phone: string, messageText: string
         const profileStr = profile.objetivo
             ? `Objetivo: ${profile.objetivo}. Nivel: ${profile.nivel || 'N/A'}. Días/semana: ${profile.diasSemana || 'N/A'}. Limitaciones: ${profile.limitaciones || 'ninguna'}. Notas trainer: ${profile.notasTrainer || 'N/A'}.`
             : 'Sin perfil de entrenamiento aún.';
+        const trainingFollowupStr = `Última rutina reportada: ${profile.ultimaRutinaReportada || 'N/A'}. Adherencia entrenamiento: ${profile.adherenciaEntrenamiento || 'N/A'}. Ejercicio difícil: ${profile.ejercicioDificil || 'N/A'}. Progreso reportado: ${profile.progresoReportado || 'N/A'}. Molestia entrenando: ${profile.molestiaEntrenando || 'N/A'}. Riesgo abandono: ${profile.riesgoAbandono || 'N/A'}.`;
+        const nutritionProfileStr = `Adherencia: ${profile.adherenciaNutricional || 'N/A'}. Dificultad: ${profile.dificultadNutricional || 'N/A'}. Comida problemática: ${profile.comidaProblematica || 'N/A'}. Patrón de recaída: ${profile.patronRecaida || 'N/A'}. Preferencias alimentarias: ${profile.preferenciasAlimentarias || 'N/A'}.`;
 
         // Determinar qué pregunta de perfil hacer (solo miembros activos, no vencidos)
         if (data.status === 'active' && profileStep < 3 && !daysOverdue) {
@@ -936,7 +1020,7 @@ export async function processMessage(db: any, phone: string, messageText: string
         }
 
         const hasDiet = data.diet ? 'Sí (asignada)' : 'No (sin asignar)';
-        customerContext = `CLIENTE REGISTRADO: Nombre: ${data.name || 'N/A'}. DNI: ${data.dni || 'N/A'}. Email: ${data.email || 'N/A'}. Plan: ${data.plan || 'sin plan'}. Estado: ${data.status || 'prospect'}. Vence: ${data.endDate || 'N/A'}. Días vencido: ${daysOverdue !== null ? daysOverdue : 'N/A (activo)'}. Dieta Asignada: ${hasDiet}. Perfil Entrenamiento: ${profileStr}. Horario habitual: ${profile.horarioHabitual || 'N/A'}. Preferencia: ${profile.preferenciaClases || 'N/A'}. Constancia: ${profile.constancia || 'N/A'}. Estado motivacional: ${profile.estadoMotivacional || 'N/A'}.`;
+        customerContext = `CLIENTE REGISTRADO: Nombre: ${data.name || 'N/A'}. DNI: ${data.dni || 'N/A'}. Email: ${data.email || 'N/A'}. Plan: ${data.plan || 'sin plan'}. Estado: ${data.status || 'prospect'}. Vence: ${data.endDate || 'N/A'}. Días vencido: ${daysOverdue !== null ? daysOverdue : 'N/A (activo)'}. Dieta Asignada: ${hasDiet}. Perfil Entrenamiento: ${profileStr}. Horario habitual: ${profile.horarioHabitual || 'N/A'}. Preferencia: ${profile.preferenciaClases || 'N/A'}. Constancia: ${profile.constancia || 'N/A'}. Estado motivacional: ${profile.estadoMotivacional || 'N/A'}. Seguimiento entrenamiento: ${trainingFollowupStr}. Perfil nutricional: ${nutritionProfileStr}`;
     }
 
     const historySnapshot = await db.collection('messages')
@@ -1021,9 +1105,9 @@ export async function processMessage(db: any, phone: string, messageText: string
         * Domingos: 6:00 AM - 12:00 PM (Mediodía)
         * Feriados: Consultar disponibilidad.
     - Precios de Membresía (Sin costo de matrícula):
-        * 1 Mes: S/ 80
-        * 2 Meses: S/ 120 (Se puede pagar en 2 partes)
-        * 3 Meses: S/ 150 (Se puede pagar en 2 partes)
+        * 1 Mes: S/ 70
+        * 2 Meses: S/ 120
+        * 3 Meses: S/ 150 (promocion)
     - Clases Grupales:
         * FULLBODY con LIZ PIA
         * Lunes a Viernes: 8:30 AM y 8:00 PM
@@ -1059,16 +1143,18 @@ export async function processMessage(db: any, phone: string, messageText: string
        - Cuando generes link de membresía, responde con entusiasmo como antes. Cuando generes link de clase grupal, deja claro que es sólo para clases grupales y no para clase libre de máquinas.
        - Si el cliente todavía no te dijo día u hora de la clase grupal, NO generes el link todavía. Primero aclara si quiere 8:30 AM u 8:00 PM.
     6. Si pide su rutina, usa 'get_student_routine' (solo si daysOverdue < 20). Si pide su dieta, usa 'get_student_diet' (solo si daysOverdue < 20).
-    7. Si responde a tus preguntas de perfil (objetivo, nivel, horario, limitaciones, etc.), usa 'update_member_profile' inmediatamente.
+    7. Si responde a tus preguntas de perfil (objetivo, nivel, horario, limitaciones, etc.), comparte datos sobre su rutina (si entrenó, qué le cuesta, progreso, dolor, faltas) o comparte datos de nutrición útiles (comida que le cuesta, ansiedad, antojos, adherencia, preferencias), usa 'update_member_profile' inmediatamente.
     8. Usa la memoria del cliente para responder de forma personal, pero natural. No enumeres su perfil como expediente ni digas "recuerdo que...". Úsala con tacto.
     9. Completa el perfil poco a poco, nunca como interrogatorio. Solo pregunta un dato faltante cuando ayude de verdad a acompañarlo mejor.
-    10. ENTREGA DE DIETA (NIVEL EXPERTO): Cuando uses 'get_student_diet', NUNCA envíes todo el plan de golpe. Sigue esta lógica exacta:
+    10. SEGUIMIENTO DE ENTRENAMIENTO LIGERO: Cuando el cliente hable de su rutina, cumplimiento, ejercicio difícil, progreso, dolor o faltas, guarda esa señal y úsala para explicar mejor la rutina. Ayuda a entender ejercicios con indicaciones simples, pero deriva a entrenador presencial si menciona dolor fuerte, lesión o algo que requiera corrección técnica en persona.
+    11. SEGUIMIENTO NUTRICIONAL LIGERO: Cuando el cliente hable de dieta, antojos, ansiedad, comidas que se salta o dificultades para cumplir, guarda esa señal y responde con una recomendación corta y aplicable. Si ya tiene una dificultad nutricional registrada, adapta la respuesta a ese patrón.
+    12. ENTREGA DE DIETA (NIVEL EXPERTO): Cuando uses 'get_student_diet', NUNCA envíes todo el plan de golpe. Sigue esta lógica exacta:
        a) Usa el día actual (${currentDay}) para identificar qué grupo de días del plan corresponde HOY. Regla general para planes semanales de 3 grupos: Lunes/Martes/Miércoles → Días 1-3, Jueves/Viernes → Días 4-5, Sábado/Domingo → Días 6-7.
        b) Menciona proactivamente a qué fase/grupo pertenece hoy y su nombre de la dieta (ej. "Alta Rendimiento", "Variación Metabólica", "Bajo en Carbs").
        c) Pregúntale qué comida quiere ver ahora (Desayuno, Almuerzo o Cena) o si prefiere ver también la suplementación.
        d) EJEMPLO de respuesta ideal: "¡Hola Robert! 💪 Hoy es ${currentDay}, que corresponde a tu fase de *Variación Metabólica* (Días 4-5). ¿Quieres ver tu almuerzo de hoy o la suplementación pre-entreno? 🍗"
        e) Entrega las porciones de forma interactiva y con emojis de alimentos (🍗🥑🍳🥩).
-    11. ESTILO DE RESPUESTA - REGLAS DE ORO:
+    13. ESTILO DE RESPUESTA - REGLAS DE ORO:
        - SIEMPRE responde como si fueras una amiga mandando un WhatsApp, no como un blog ni un manual.
        - NUNCA uses negritas (*texto*) para subtítulos ni títulos dentro de la respuesta. Las negritas solo están permitidas para resaltar UNA palabra clave importante, no para crear estructura tipo artículo.
        - NUNCA uses listas numeradas. Si necesitas listar cosas, usa máximo 3 ítems con emojis como viñetas.

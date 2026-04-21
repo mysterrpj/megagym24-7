@@ -67,7 +67,7 @@ export async function generatePaymentLink(phone: string, planName: string, optio
         });
     };
 
-    let amount = 8000;
+    let amount = 7000;
     const normalizedPlan = planName?.toLowerCase() || '';
     const paymentType = options.paymentType === 'class_booking' ? 'class_booking' : 'membership';
 

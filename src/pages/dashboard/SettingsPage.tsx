@@ -28,9 +28,9 @@ export function SettingsPage() {
 
             // 1. Memberships
             const plans = [
-                { name: "Plan Mensual", price: 80, duration: '1 Mes', features: ["Acceso total", "Duchas"], activeMembers: 12, color: 'border-neutral-700' },
-                { name: "Plan Bimestral", price: 150, duration: '2 Meses', features: ["Acceso total", "Duchas", "1 Invitado"], activeMembers: 8, color: 'border-green-500', badge: 'Popular' },
-                { name: "Plan Trimestral", price: 210, duration: '3 Meses', features: ["Acceso total", "Duchas", "2 Invitados"], activeMembers: 5, color: 'border-neutral-700' }
+                { name: "Plan Mensual", price: 70, duration: '1 Mes', features: ["Acceso total", "Duchas"], activeMembers: 12, color: 'border-neutral-700' },
+                { name: "Plan Bimestral", price: 120, duration: '2 Meses', features: ["Acceso total", "Duchas"], activeMembers: 8, color: 'border-neutral-700' },
+                { name: "Plan Trimestral", price: 150, duration: '3 Meses', features: ["Acceso total", "Duchas", "Promocion"], activeMembers: 5, color: 'border-green-500', badge: 'Promo' }
             ];
 
             for (const plan of plans) {

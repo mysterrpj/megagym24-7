@@ -22,7 +22,7 @@ export interface CulqiOrder {
 }
 
 export const createCulqiOrder = async (
-    amount: number, // In cents (e.g. 8000 for S/ 80.00)
+    amount: number, // In cents (e.g. 7000 for S/ 70.00)
     description: string,
     client: { first_name: string; last_name: string; email: string; phone: string },
     metadata: any = {}

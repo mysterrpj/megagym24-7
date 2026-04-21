@@ -40,9 +40,9 @@ export function MemberDashboard() {
 
                             <div className="grid grid-cols-1 gap-3">
                                 {[
-                                    { name: '1 Mes', price: 80, label: 'Mensual' },
-                                    { name: '2 Meses', price: 120, label: 'Bimestral (Ahorra S/ 40)' },
-                                    { name: '3 Meses', price: 150, label: 'Trimestral (Ahorra S/ 90)' }
+                                    { name: '1 Mes', price: 70, label: 'Mensual' },
+                                    { name: '2 Meses', price: 120, label: 'Bimestral (Ahorra S/ 20)' },
+                                    { name: '3 Meses', price: 150, label: 'Trimestral promo (Ahorra S/ 60)' }
                                 ].map((plan) => (
                                     <div key={plan.name} className="flex items-center justify-between p-3 bg-neutral-800 rounded-lg border border-neutral-700">
                                         <div>

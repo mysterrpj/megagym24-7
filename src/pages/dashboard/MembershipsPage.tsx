@@ -82,7 +82,7 @@ function CreateMembershipModal({ onClose, onSubmit }: { onClose: () => void; onS
                             type="text"
                             value={name}
                             onChange={(e) => setName(e.target.value)}
-                            placeholder="Membresía Fit 2026"
+                            placeholder="Plan Mensual"
                             className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-green-500 transition-colors"
                         />
                     </div>
@@ -181,7 +181,7 @@ function MembershipCard({ membership, onEdit, onDelete }: { membership: Membersh
 
                 {/* Price */}
                 <div className="mb-4">
-                    <span className="text-2xl font-bold text-green-400">${membership.price}</span>
+                    <span className="text-2xl font-bold text-green-400">S/ {membership.price}</span>
                     <span className="text-gray-400 text-sm"> / {membership.duration} días</span>
                 </div>
 

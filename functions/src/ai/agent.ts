@@ -42,7 +42,7 @@ export async function processMessage(phone: string, messageText: string) {
     - **Payment Methods:** Yape, Plin, Cash, Credit Card (Culqi/Web).
 
     - **Prices:** (No enrollment fee)
-        - **1 Month:** S/ 80.
+        - **1 Month:** S/ 70.
         - **2 Months:** S/ 120.
         - **3 Months:** S/ 150.
         - **Daily Class:** S/ 6.
@@ -52,8 +52,8 @@ export async function processMessage(phone: string, messageText: string) {
         - Once generated, show the link and say: "Here is your secure payment link. Once paid, your membership activates automatically! 🚀"
     
     **AEROBICS / GROUP CLASSES:**
-    - **Schedule:** Mon-Sat at 8:00 AM and 8:00 PM.
-    - **Price:** S/ 80/month (Use 1 Month plan) or S/ 6 per class.
+    - **Schedule:** Mon-Fri at 8:30 AM and 8:00 PM.
+    - **Price:** S/ 6 per class.
     
     **POLICIES:**
     - **Freezing:** Allowed for travel or health reasons. Coordinate via WhatsApp.

@@ -23,9 +23,9 @@ async function seed() {
 
         // 2. Memberships
         const plans = [
-            { name: "Plan Mensual", price: 80, duration_days: 30, benefits: ["Acceso total", "Duchas"] },
-            { name: "Plan Bimestral", price: 150, duration_days: 60, benefits: ["Acceso total", "Duchas", "1 Invitado"] },
-            { name: "Plan Trimestral", price: 210, duration_days: 90, benefits: ["Acceso total", "Duchas", "2 Invitados"] }
+            { name: "Plan Mensual", price: 70, duration_days: 30, benefits: ["Acceso total", "Duchas"] },
+            { name: "Plan Bimestral", price: 120, duration_days: 60, benefits: ["Acceso total", "Duchas"] },
+            { name: "Plan Trimestral", price: 150, duration_days: 90, benefits: ["Acceso total", "Duchas", "Promocion"] }
         ];
 
         for (const plan of plans) {

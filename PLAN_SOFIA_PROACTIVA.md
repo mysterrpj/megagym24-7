@@ -30,6 +30,8 @@ Por eso, la pantalla `Mensajes` queda minimalista:
 - Recordatorios automaticos de membresia y deuda.
 - Recordatorios automaticos de clases grupales confirmadas.
 - Memoria progresiva del cliente en `trainingProfile` y `assistantMemory`.
+- Seguimiento ligero de entrenamiento dentro de `trainingProfile`.
+- Seguimiento nutricional ligero dentro de `trainingProfile`.
 - Dashboard de mensajes como historial limpio.
 
 ## Reglas actuales importantes
@@ -38,6 +40,8 @@ Por eso, la pantalla `Mensajes` queda minimalista:
 - Si el cliente pide reservar o pagar una clase grupal, aerobicos o FULLBODY, Sofia genera link de `class_booking`.
 - Si el cliente pide clase libre de maquinas o pase por dia de gimnasio, el pago se hace en recepcion por ahora.
 - La memoria del cliente se obtiene poco a poco en conversacion; Sofia no debe convertirlo en formulario.
+- Si el cliente habla de su rutina, cumplimiento, ejercicio dificil, progreso, dolor o faltas, Sofia puede guardar esa senal para explicar mejor y acompanar.
+- Si el cliente habla de dieta, antojos, ansiedad, comidas que se salta o dificultad para cumplir, Sofia puede guardar esa senal y usarla para responder mejor.
 - No implementar envio manual desde `Mensajes` salvo decision explicita futura.
 - No convertir `Mensajes` en CRM completo si el propietario no lo va a usar.
 
@@ -46,12 +50,34 @@ Por eso, la pantalla `Mensajes` queda minimalista:
 - Probar una reserva real completa: pedir clase, pagar con Culqi/Yape o tarjeta, verificar creacion de `booking`.
 - Revisar el comportamiento cuando el pago se aprueba pero el cupo ya no existe.
 - Definir politica futura de cancelacion/reprogramacion sin devolucion.
-- Profundizar memoria de cliente para progreso, adherencia y riesgo de abandono.
+- Profundizar memoria de cliente para progreso y riesgo de abandono.
 - Migrar configuracion de `functions.config()` a parametros antes de marzo 2027.
+
+## Pendiente futuro - Nutricion
+
+No implementar todavia. Retomar mas adelante cuando el flujo actual este probado con clientes reales.
+
+- Mostrar en el dashboard los campos nutricionales guardados en `trainingProfile`.
+- Crear seguimiento semanal simple de adherencia nutricional.
+- Evaluar check-ins automaticos de nutricion por WhatsApp.
+- Guardar historial por fecha solo si realmente se va a usar para seguimiento.
+- Mantener la dieta base como plan manual pegado por el administrador; Sofia solo debe acompanar y personalizar, no reemplazar al entrenador/nutricionista.
+
+## Pendiente futuro - Rutinas
+
+No implementar todavia. Por ahora Sofia solo guarda seguimiento ligero para ayudar a entender rutinas y acompanar mejor.
+
+- Registro avanzado de rutinas con series, pesos y repeticiones.
+- Historial por ejercicio y fecha.
+- Medicion de progreso por carga, repeticiones o cumplimiento.
+- Vista en dashboard para que el entrenador revise avances y ejercicios problematicos.
+- Alertas o resumen para detectar alumnos estancados o con riesgo de abandono.
 
 ## No priorizar por ahora
 
 - Voucher como imagen por WhatsApp.
 - Registro manual de asistencia.
+- Tracker avanzado de rutinas con series, pesos y repeticiones.
 - CRM conversacional completo.
 - Envio manual desde dashboard.
+- Modulo nutricional avanzado.

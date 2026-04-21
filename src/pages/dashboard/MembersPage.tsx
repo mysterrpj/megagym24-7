@@ -28,9 +28,9 @@ interface Member {
 }
 
 const PLAN_OPTIONS = [
-    { name: 'Plan Mensual', price: 80, days: 30 },
+    { name: 'Plan Mensual', price: 70, days: 30 },
+    { name: 'Plan Bimestral', price: 120, days: 60 },
     { name: 'Plan Trimestral', price: 150, days: 90 },
-    { name: 'Membresía Fit 2026', price: 80, days: 365 },
 ];
 
 const TRAINING_TEMPLATES = [
@@ -67,7 +67,7 @@ function MemberModal({
     const [dni, setDni] = useState(member?.dni || '');
     const [email, setEmail] = useState(member?.email || '');
     const [phone, setPhone] = useState(member?.phone || '');
-    const [plan, setPlan] = useState(member?.plan || 'Membresía Fit 2026');
+    const [plan, setPlan] = useState(member?.plan || 'Plan Mensual');
     const [status, setStatus] = useState<'active' | 'pending' | 'prospect' | 'overdue'>(member?.status === 'overdue' ? 'overdue' : (member?.status || 'active'));
 
     // Training profile
@@ -81,8 +81,8 @@ function MemberModal({
     const [diet, setDiet] = useState(member?.diet || '');
 
     // Payment fields
-    const [planPrice, setPlanPrice] = useState(member?.planPrice?.toString() || '80');
-    const [amountPaid, setAmountPaid] = useState(member?.amountPaid?.toString() || '80');
+    const [planPrice, setPlanPrice] = useState(member?.planPrice?.toString() || '70');
+    const [amountPaid, setAmountPaid] = useState(member?.amountPaid?.toString() || '70');
 
     // Join Date State (New)
     const [joinDate, setJoinDate] = useState(() => {
@@ -266,9 +266,9 @@ function MemberModal({
                                 onChange={(e) => setPlan(e.target.value)}
                                 className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:border-green-500 transition-colors appearance-none"
                             >
-                                <option>Membresía Fit 2026</option>
-                                <option>Plan Trimestral</option>
                                 <option>Plan Mensual</option>
+                                <option>Plan Bimestral</option>
+                                <option>Plan Trimestral</option>
                             </select>
                         </div>
                         <div>
@@ -532,9 +532,9 @@ function PaymentModal({
                             onChange={(e) => setSelectedPlan(e.target.value)}
                             className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:border-green-500 transition-colors appearance-none"
                         >
-                            <option>Membresía Fit 2026</option>
-                            <option>Plan Trimestral</option>
                             <option>Plan Mensual</option>
+                            <option>Plan Bimestral</option>
+                            <option>Plan Trimestral</option>
                             <option>Clase Individual</option>
                         </select>
                     </div>
@@ -638,7 +638,7 @@ function CashPaymentModal({
             const planOption = PLAN_OPTIONS.find(p => p.name === selectedPlan);
             renewalData = {
                 plan: selectedPlan,
-                planPrice: planOption?.price || (member.planPrice || 80),
+                planPrice: planOption?.price || (member.planPrice || 70),
                 startDate: getStartDate()
             };
         }

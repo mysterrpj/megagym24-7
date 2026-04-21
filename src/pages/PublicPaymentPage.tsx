@@ -18,7 +18,7 @@ export const PublicPaymentPage = () => {
     const orderId = searchParams.get('orderId');
     const phone = searchParams.get('phone') || '';
     const plan = searchParams.get('plan') || 'Plan 1 Mes';
-    const amount = parseInt(searchParams.get('amount') || '8000');
+    const amount = parseInt(searchParams.get('amount') || '7000');
     const paymentType = searchParams.get('paymentType') || 'membership';
     const classId = searchParams.get('classId') || '';
     const bookingDate = searchParams.get('bookingDate') || '';
