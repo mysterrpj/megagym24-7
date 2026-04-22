@@ -181,6 +181,42 @@ function mentionsPaymentIntent(text: string) {
         .some((token) => normalized.includes(token));
 }
 
+function mentionsDeferredRenewalIntent(text: string) {
+    const normalized = normalizeText(text);
+    const wantsToContinue = [
+        'si continuo',
+        'si voy a continuar',
+        'voy a continuar',
+        'voy a seguir',
+        'sigo entrenando',
+        'seguire entrenando',
+        'quiero continuar',
+        'quiero seguir',
+        'continuo',
+        'sigo'
+    ].some((token) => normalized.includes(token));
+
+    const willPayLater = [
+        'pago luego',
+        'pagare luego',
+        'pago despues',
+        'pagare despues',
+        'te pago luego',
+        'te pago despues',
+        'te alcanzo',
+        'te voy a alcanzar',
+        'en estos dias',
+        'mas tarde',
+        'cuando vaya',
+        'cuando vaya al gym',
+        'cuando llegue',
+        'manana pago',
+        'mañana pago'
+    ].some((token) => normalized.includes(token));
+
+    return wantsToContinue && willPayLater;
+}
+
 function mentionsReservationIntent(text: string) {
     const normalized = normalizeText(text);
     return ['quiero reservar', 'reservar', 'reserva', 'separar', 'quiero separar']
@@ -1021,6 +1057,20 @@ export async function processMessage(db: any, phone: string, messageText: string
 
         const hasDiet = data.diet ? 'Sí (asignada)' : 'No (sin asignar)';
         customerContext = `CLIENTE REGISTRADO: Nombre: ${data.name || 'N/A'}. DNI: ${data.dni || 'N/A'}. Email: ${data.email || 'N/A'}. Plan: ${data.plan || 'sin plan'}. Estado: ${data.status || 'prospect'}. Vence: ${data.endDate || 'N/A'}. Días vencido: ${daysOverdue !== null ? daysOverdue : 'N/A (activo)'}. Dieta Asignada: ${hasDiet}. Perfil Entrenamiento: ${profileStr}. Horario habitual: ${profile.horarioHabitual || 'N/A'}. Preferencia: ${profile.preferenciaClases || 'N/A'}. Constancia: ${profile.constancia || 'N/A'}. Estado motivacional: ${profile.estadoMotivacional || 'N/A'}. Seguimiento entrenamiento: ${trainingFollowupStr}. Perfil nutricional: ${nutritionProfileStr}`;
+    }
+
+    if (memberDoc && !memberDoc.empty && daysOverdue !== null && mentionsDeferredRenewalIntent(messageText)) {
+        await memberDoc.docs[0].ref.set({
+            assistantMemory: {
+                ...(memberDoc.docs[0].data().assistantMemory || {}),
+                renewalIntent: 'continue_pay_later',
+                renewalIntentText: String(messageText || '').trim().slice(0, 220),
+                renewalIntentAt: adminInner.firestore.FieldValue.serverTimestamp(),
+                updatedAt: adminInner.firestore.FieldValue.serverTimestamp()
+            }
+        }, { merge: true });
+
+        return `Perfecto${clientFirstName ? ` ${clientFirstName}` : ''} 😊 Lo tomo en cuenta. Te recuerdo en unos días para que puedas regularizar tu membresía con calma.`;
     }
 
     const historySnapshot = await db.collection('messages')

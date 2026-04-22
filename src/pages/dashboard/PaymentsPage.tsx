@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Download, Plus, DollarSign, TrendingUp, TrendingDown, Calendar, Search, MoreVertical, CreditCard, FileText, Banknote, Landmark } from 'lucide-react';
 import { BarChart, Bar, XAxis, Tooltip, ResponsiveContainer, Cell, LabelList } from 'recharts';
-import { collection, query, orderBy, onSnapshot, doc, getDoc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, doc, getDoc, updateDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { NewInvoiceDialog } from '@/components/dashboard/NewInvoiceDialog';
 
@@ -20,6 +20,28 @@ interface Transaction {
     method: string;
     status: 'Pagado' | 'Pendiente' | 'Reembolsado';
     type?: 'Boleta' | 'Factura';
+}
+
+function toDate(value: any): Date {
+    if (value?.toDate) return value.toDate();
+    return new Date(value || new Date());
+}
+
+function amountKey(value: any): string {
+    return (Number(value) || 0).toFixed(2);
+}
+
+function isSameRecordedPayment(memberPayment: any, paymentDoc: any): boolean {
+    if (!paymentDoc.memberId) return false;
+    if (amountKey(memberPayment.amount) !== amountKey(paymentDoc.amount)) return false;
+
+    const memberDate = toDate(memberPayment.date);
+    const docDate = toDate(paymentDoc.date || paymentDoc.createdAt);
+    const timeDiffMs = Math.abs(memberDate.getTime() - docDate.getTime());
+
+    // Cash payments created from MembersPage are written to both places using
+    // the same timestamp. Keep one visible row so revenue is not double counted.
+    return timeDiffMs <= 5 * 60 * 1000;
 }
 
 export function PaymentsPage() {
@@ -58,8 +80,7 @@ export function PaymentsPage() {
                 const payments: any[] = memberSnap.data().payments || [];
                 const idx = Number(lastPart);
                 const newPayments = payments.filter((_: any, i: number) => i !== idx);
-                const newAmountPaid = newPayments.reduce((sum: number, p: any) => sum + (Number(p.amount) || 0), 0);
-                await updateDoc(memberRef, { payments: newPayments, amountPaid: newAmountPaid });
+                await updateDoc(memberRef, { payments: newPayments, updatedAt: serverTimestamp() });
             } else {
                 await deleteDoc(doc(db, 'payments', txId));
             }
@@ -111,6 +132,13 @@ export function PaymentsPage() {
                 if (payments.length > 0) {
                     // Show each payment individually
                     payments.forEach((pago: any, pIndex: number) => {
+                        const isDuplicatedInPaymentsCollection = paymentsData.some((paymentDoc) => {
+                            const paymentData = paymentDoc.data;
+                            return paymentData.memberId === data.id && isSameRecordedPayment(pago, paymentData);
+                        });
+
+                        if (isDuplicatedInPaymentsCollection) return;
+
                         const amount = Number(pago.amount) || 0;
                         let dateObj = new Date();
                         if (pago.date) dateObj = new Date(pago.date);
@@ -418,7 +446,7 @@ export function PaymentsPage() {
                                     <th className="px-6 py-4">Miembro</th>
                                     <th className="px-6 py-4">Plan</th>
                                     <th className="px-6 py-4">Monto</th>
-                                    <th className="px-6 py-4">Fecha</th>
+                                    <th className="px-6 py-4">Fecha del movimiento</th>
                                     <th className="px-6 py-4">Método</th>
                                     <th className="px-6 py-4">Estado</th>
                                     <th className="px-6 py-4 text-right">Acciones</th>

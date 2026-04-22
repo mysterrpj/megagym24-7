@@ -21,6 +21,7 @@ interface Member {
     avatarColor: string;
     amountPaid?: number;
     planPrice?: number;
+    debt?: number;
     expirationDate?: string;
     rawJoinDate?: any;
     expirationDateObj?: Date;
@@ -1099,6 +1100,7 @@ export function MembersPage() {
                     avatarColor: `bg-${['green', 'blue', 'purple', 'orange', 'pink'][Math.floor(Math.random() * 5)]}-600`,
                     amountPaid: data.amountPaid,
                     planPrice: data.planPrice,
+                    debt: data.debt,
                     expirationDate,
                     expirationDateObj: expDateObj,
                     rawJoinDate: data.createdAt,
@@ -1219,6 +1221,7 @@ export function MembersPage() {
                     status: data.status,
                     amountPaid: data.amountPaid,
                     planPrice: data.planPrice,
+                    debt: data.debt || 0,
                     startDate: data.joinDateStr || '',
                     endDate: data.expirationDateStr || '',
                     expirationDate: expirationDateObj,
@@ -1395,13 +1398,16 @@ export function MembersPage() {
                                                     member.status === 'pending' ? 'Pendiente' :
                                                         member.status === 'prospect' ? 'Prospecto' : 'Vencido'}
                                             </span>
-                                            {(member.planPrice && member.amountPaid && member.planPrice > member.amountPaid) ? (
-                                                <div className="mt-1">
-                                                    <span className="text-[10px] bg-red-500 text-white px-2 py-0.5 rounded-full font-bold">
-                                                        Debe: S/ {(member.planPrice - member.amountPaid)}
-                                                    </span>
-                                                </div>
-                                            ) : null}
+                                            {(() => {
+                                                const debt = Number(member.debt ?? Math.max(0, Number(member.planPrice || 0) - Number(member.amountPaid || 0)));
+                                                return debt > 0 ? (
+                                                    <div className="mt-1">
+                                                        <span className="text-[10px] bg-red-500 text-white px-2 py-0.5 rounded-full font-bold">
+                                                            Debe: S/ {debt.toFixed(2)}
+                                                        </span>
+                                                    </div>
+                                                ) : null;
+                                            })()}
                                         </td>
                                         <td className="px-6 py-4 text-right">
                                             <MemberActionsMenu

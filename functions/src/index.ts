@@ -35,6 +35,22 @@ function getLimaDateString(date = new Date()) {
     return formatter.format(date);
 }
 
+function parseLimaDate(dateString: string) {
+    return new Date(`${dateString}T00:00:00-05:00`);
+}
+
+function addDaysToLimaDate(dateString: string, days: number) {
+    const date = parseLimaDate(dateString);
+    date.setUTCDate(date.getUTCDate() + days);
+    return getLimaDateString(date);
+}
+
+function diffLimaDays(fromDateString: string, toDateString: string) {
+    const from = parseLimaDate(fromDateString);
+    const to = parseLimaDate(toDateString);
+    return Math.round((to.getTime() - from.getTime()) / (1000 * 60 * 60 * 24));
+}
+
 function getLimaMinutesSinceMidnight(date = new Date()) {
     const formatter = new Intl.DateTimeFormat('en-GB', {
         timeZone: 'America/Lima',
@@ -439,10 +455,8 @@ export const membershipReminder = functions
         if (!adminInner.apps.length) adminInner.initializeApp();
         const db = adminInner.firestore();
 
-        const in3days = new Date();
-        in3days.setHours(0, 0, 0, 0);
-        in3days.setDate(in3days.getDate() + 3);
-        const in3daysStr = in3days.toISOString().split('T')[0];
+        const todayStr = getLimaDateString();
+        const in3daysStr = addDaysToLimaDate(todayStr, 3);
 
         const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
         const FROM = 'whatsapp:+51907935299';
@@ -470,18 +484,81 @@ export const membershipReminder = functions
             }
         }
 
+        const membersSnap = await db.collection('members').get();
+        for (const doc of membersSnap.docs) {
+            const member = doc.data();
+            const phone = member.phone;
+            const endDate = String(member.endDate || '');
+            if (!phone || !endDate) continue;
+            if ((member.status || '') === 'prospect') continue;
+            if (Number(member.debt) > 0) continue;
+
+            const name = (member.name || 'amigo').split(' ')[0];
+            const renewalIntent = member.assistantMemory || {};
+            const renewalIntentAt = renewalIntent.renewalIntentAt?.toDate?.();
+            if (renewalIntent.renewalIntent === 'continue_pay_later' && renewalIntentAt && !renewalIntent.renewalFollowupSentAt) {
+                const daysSinceIntent = diffLimaDays(getLimaDateString(renewalIntentAt), todayStr);
+                if (daysSinceIntent >= 5) {
+                    const msg = `¡Hola ${name}! 😊 Te recuerdo con calma que tu renovación de MegaGym quedó pendiente. Cuando puedas, regularízala para seguir entrenando normal 💪`;
+                    try {
+                        await twilioClient.messages.create({ from: FROM, to: `whatsapp:${phone}`, body: msg });
+                        await db.collection('messages').add({
+                            phone,
+                            content: msg,
+                            direction: 'outbound',
+                            timestamp: adminInner.firestore.FieldValue.serverTimestamp(),
+                            source: 'scheduled_deferred_renewal_followup'
+                        });
+                        await doc.ref.set({
+                            assistantMemory: {
+                                ...renewalIntent,
+                                renewalFollowupSentAt: adminInner.firestore.FieldValue.serverTimestamp(),
+                                updatedAt: adminInner.firestore.FieldValue.serverTimestamp()
+                            }
+                        }, { merge: true });
+                        console.log(`Deferred renewal follow-up sent to ${phone}`);
+                    } catch (e) {
+                        console.error(`Error sending deferred renewal follow-up to ${phone}:`, e);
+                    }
+                    continue;
+                }
+            }
+
+            const daysOverdue = diffLimaDays(endDate, todayStr);
+            if (![1, 7].includes(daysOverdue)) continue;
+            if (Number(member.lastOverdueReminderDay) === daysOverdue) continue;
+
+            const msg = daysOverdue === 1
+                ? `¡Hola ${name}! 😊 Te recordamos que tu membresía venció ayer. ¿Deseas renovarla para seguir entrenando en MegaGym?`
+                : `¡Hola ${name}! 😊 Te escribo para confirmar si deseas renovar tu membresía de MegaGym. Si quieres continuar, puedo ayudarte por aquí 💪`;
+
+            try {
+                await twilioClient.messages.create({ from: FROM, to: `whatsapp:${phone}`, body: msg });
+                await db.collection('messages').add({
+                    phone,
+                    content: msg,
+                    direction: 'outbound',
+                    timestamp: adminInner.firestore.FieldValue.serverTimestamp(),
+                    source: 'scheduled_overdue_membership_reminder'
+                });
+                await doc.ref.set({
+                    lastOverdueReminderDay: daysOverdue,
+                    lastOverdueReminderAt: adminInner.firestore.FieldValue.serverTimestamp()
+                }, { merge: true });
+                console.log(`Overdue reminder sent to ${phone} (day ${daysOverdue})`);
+            } catch (e) {
+                console.error(`Error sending overdue reminder to ${phone}:`, e);
+            }
+        }
+
         const debtSnap = await db.collection('members').where('debt', '>', 0).get();
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
 
         for (const doc of debtSnap.docs) {
             const member = doc.data();
             const phone = member.phone;
             if (!phone || !member.startDate) continue;
 
-            const start = new Date(member.startDate);
-            start.setHours(0, 0, 0, 0);
-            const diffDays = Math.round((today.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+            const diffDays = diffLimaDays(member.startDate, todayStr);
 
             if (diffDays <= 0 || diffDays % 7 !== 0) continue;
 
