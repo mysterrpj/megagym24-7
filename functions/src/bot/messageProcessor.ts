@@ -181,6 +181,55 @@ function mentionsPaymentIntent(text: string) {
         .some((token) => normalized.includes(token));
 }
 
+function mentionsVoucherIntent(text: string) {
+    const normalized = normalizeText(text);
+    return ['voucher', 'comprobante', 'recibo', 'boleta', 'constancia de pago']
+        .some((token) => normalized.includes(token));
+}
+
+function mentionsDebtPaymentIntent(text: string) {
+    const normalized = normalizeText(text);
+    const mentionsDebt = ['deuda', 'debo', 'saldo pendiente', 'saldo', 'pendiente']
+        .some((token) => normalized.includes(token));
+    const wantsToPayDebt = mentionsPaymentIntent(text) || ['pagar', 'cancelar', 'regularizar', 'abonar', 'link']
+        .some((token) => normalized.includes(token));
+    return mentionsDebt && wantsToPayDebt;
+}
+
+function getPaymentDateString(payment: any) {
+    const rawDate = payment?.date || payment?.createdAt;
+    if (!rawDate) return '';
+    const date = rawDate?.toDate ? rawDate.toDate() : new Date(rawDate);
+    if (isNaN(date.getTime())) return String(rawDate).slice(0, 10);
+    return date.toLocaleDateString('es-PE', {
+        timeZone: 'America/Lima',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric'
+    });
+}
+
+function getPaymentTimeString(payment: any) {
+    const rawDate = payment?.date || payment?.createdAt;
+    if (!rawDate) return '';
+    const date = rawDate?.toDate ? rawDate.toDate() : new Date(rawDate);
+    if (isNaN(date.getTime())) return '';
+    return date.toLocaleTimeString('es-PE', {
+        timeZone: 'America/Lima',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+    });
+}
+
+function getPaymentLabel(payment: any, hasFutureAdvanceInGroup: boolean) {
+    if (payment?.type === 'future_renewal_advance') return 'Adelanto renovacion futura';
+    if (payment?.type === 'renewal_payment') return 'Pago de renovacion';
+    if (payment?.type === 'debt_payment') return 'Pago de deuda';
+    if (hasFutureAdvanceInGroup) return 'Pago de deuda';
+    return 'Pago registrado';
+}
+
 function mentionsDeferredRenewalIntent(text: string) {
     const normalized = normalizeText(text);
     const wantsToContinue = [
@@ -555,6 +604,7 @@ export async function executeTool(name: string, args: any) {
                 let planName = args.planName;
                 let bookingDate = args.bookingDate || '';
                 let classId = String(args.classId || '').trim();
+                let amount = Number(args.amount) || 0;
 
                 if (args.paymentType === 'class_booking') {
                     const resolvedClass = await resolveClassBookingTarget(dbInner, {
@@ -586,7 +636,14 @@ export async function executeTool(name: string, args: any) {
                         customerName = customerName || memData.name || 'Usuario';
                         dni = dni || memData.dni || '';
                         email = email || memData.email || 'cliente@megagym.pe';
+                        if (args.paymentType === 'debt_payment') {
+                            amount = Math.max(0, Number(memData.debt) || 0);
+                        }
                     }
+                }
+
+                if (args.paymentType === 'debt_payment' && amount <= 0) {
+                    return { error: 'El cliente no tiene deuda pendiente para pagar.' };
                 }
 
                 const response = await fetch('https://us-central1-fit-ia-megagym.cloudfunctions.net/generateCulqiLink', {
@@ -596,6 +653,7 @@ export async function executeTool(name: string, args: any) {
                         phone: args.phone,
                         planName,
                         paymentType: args.paymentType || 'membership',
+                        amount,
                         classId,
                         bookingDate,
                         customerName,
@@ -643,12 +701,15 @@ export async function executeTool(name: string, args: any) {
                 if (!snap) return { error: "No se encontró al miembro con ese número." };
                 const member = snap.docs[0].data();
 
-                // Usar el monto del último pago, no el acumulado
-                const lastPayment = member.payments?.[member.payments.length - 1];
-                const planPrice = Number(member.planPrice) || 0;
-                const debt = member.debt !== undefined ? Math.max(0, Number(member.debt)) : Math.max(0, planPrice - (Number(lastPayment?.amount) || 0));
-                const amountPaid = Math.max(0, planPrice - debt);
-                const lastMethod = lastPayment?.method || (member.culqiOrderId ? 'Culqi' : 'Efectivo');
+                const payments = Array.isArray(member.payments) ? member.payments : [];
+                if (payments.length === 0) return { error: "No se encontraron pagos registrados para este miembro." };
+                const lastPayment = payments[payments.length - 1];
+                const lastPaymentDate = getPaymentDateString(lastPayment);
+                const recentPayments = payments.filter((payment: any) => getPaymentDateString(payment) === lastPaymentDate);
+                const hasFutureAdvanceInGroup = recentPayments.some((payment: any) => payment?.type === 'future_renewal_advance');
+                const totalReceived = recentPayments.reduce((sum: number, payment: any) => sum + (Number(payment.amount) || 0), 0);
+                const debt = Math.max(0, Number(member.debt) || 0);
+                const futureDebt = Math.max(0, Number(member.futureDebt) || 0);
 
                 // Resolver fecha de inicio
                 let startDateStr = member.startDate || '';
@@ -667,21 +728,30 @@ export async function executeTool(name: string, args: any) {
                 const lines = [
                     `━━━━━━━━━━━━━━━━━━━━━`,
                     `🏋️ *MEGAGYM* 🏋️`,
-                    `   COMPROBANTE DE MEMBRESÍA`,
+                    `   COMPROBANTE DE PAGO`,
                     `━━━━━━━━━━━━━━━━━━━━━`,
                     `👤 Cliente: ${(member.name || 'Cliente').toUpperCase()}`,
-                    `📋 Plan: ${member.plan || 'N/A'}`,
-                    `📅 Inicio: ${startDateStr || 'N/A'}`,
-                    `📅 Vigencia hasta: ${endDateStr || 'N/A'}`,
-                    `✅ Estado: ACTIVO`,
+                    `📅 Fecha: ${lastPaymentDate || 'N/A'}${getPaymentTimeString(lastPayment) ? ` ${getPaymentTimeString(lastPayment)}` : ''}`,
                 ];
 
-                if (amountPaid > 0) {
-                    lines.push(`💰 Pagado: S/ ${amountPaid.toFixed(2)}`);
-                    lines.push(`💳 Método: ${lastMethod}`);
-                }
+                recentPayments.forEach((payment: any) => {
+                    const label = getPaymentLabel(payment, hasFutureAdvanceInGroup);
+                    const amount = Number(payment.amount) || 0;
+                    const method = payment.method || (payment.orderId || payment.chargeId ? 'Culqi' : 'Efectivo');
+                    lines.push(`💰 ${label}: S/ ${amount.toFixed(2)} (${method})`);
+                });
+
+                lines.push(`✅ Total recibido: S/ ${totalReceived.toFixed(2)}`);
+                lines.push(`📋 Plan: ${member.plan || 'N/A'}`);
+                lines.push(`📅 Inicio: ${startDateStr || 'N/A'}`);
+                lines.push(`📅 Vigencia hasta: ${endDateStr || 'N/A'}`);
+                lines.push(`✅ Deuda actual: S/ ${debt.toFixed(2)}`);
+
                 if (debt > 0) {
                     lines.push(`⚠️ Saldo pendiente: S/ ${debt.toFixed(2)}`);
+                }
+                if (futureDebt > 0) {
+                    lines.push(`🕒 Saldo futuro: S/ ${futureDebt.toFixed(2)} desde ${member.futureDebtStartDate || startDateStr || 'N/A'}`);
                 }
                 if (member.culqiOrderId || lastPayment?.orderId) {
                     const orderId = (member.culqiOrderId || lastPayment?.orderId).toString().slice(-10).toUpperCase();
@@ -864,13 +934,14 @@ export async function processMessage(db: any, phone: string, messageText: string
             type: "function",
             function: {
                 name: "generate_payment_link",
-                description: "Generate a payment link (Culqi) for a membership or a paid group class. Use paymentType='membership' for renewals and paymentType='class_booking' only for paid group classes after the user has chosen the schedule. Do NOT use this for gym machine day passes.",
+                description: "Generate a payment link (Culqi) for a membership, a pending debt, or a paid group class. Use paymentType='debt_payment' when the customer wants to pay their debt or pending balance. Use paymentType='membership' for renewals and paymentType='class_booking' only for paid group classes after the user has chosen the schedule. Do NOT use this for gym machine day passes.",
                 parameters: {
                     type: "object",
                     properties: {
                         phone: { type: "string", description: "Customer's phone number exactly as provided in the context." },
                         planName: { type: "string", description: "Name of the plan (e.g. '1 mes', '2 meses', '3 meses')" },
-                        paymentType: { type: "string", description: "Use 'membership' or 'class_booking'." },
+                        paymentType: { type: "string", description: "Use 'membership', 'debt_payment', or 'class_booking'." },
+                        amount: { type: "number", description: "Amount in soles. Optional; for debt_payment the system will use the registered pending debt." },
                         classId: { type: "string", description: "Required when paymentType is 'class_booking'." },
                         bookingDate: { type: "string", description: "Required when paymentType is 'class_booking'. Date in YYYY-MM-DD." },
                         customerName: { type: "string", description: "User's full name (optional if already registered)" },
@@ -1056,7 +1127,8 @@ export async function processMessage(db: any, phone: string, messageText: string
         }
 
         const hasDiet = data.diet ? 'Sí (asignada)' : 'No (sin asignar)';
-        customerContext = `CLIENTE REGISTRADO: Nombre: ${data.name || 'N/A'}. DNI: ${data.dni || 'N/A'}. Email: ${data.email || 'N/A'}. Plan: ${data.plan || 'sin plan'}. Estado: ${data.status || 'prospect'}. Vence: ${data.endDate || 'N/A'}. Días vencido: ${daysOverdue !== null ? daysOverdue : 'N/A (activo)'}. Dieta Asignada: ${hasDiet}. Perfil Entrenamiento: ${profileStr}. Horario habitual: ${profile.horarioHabitual || 'N/A'}. Preferencia: ${profile.preferenciaClases || 'N/A'}. Constancia: ${profile.constancia || 'N/A'}. Estado motivacional: ${profile.estadoMotivacional || 'N/A'}. Seguimiento entrenamiento: ${trainingFollowupStr}. Perfil nutricional: ${nutritionProfileStr}`;
+        const currentDebt = Math.max(0, Number(data.debt) || 0);
+        customerContext = `CLIENTE REGISTRADO: Nombre: ${data.name || 'N/A'}. DNI: ${data.dni || 'N/A'}. Email: ${data.email || 'N/A'}. Plan: ${data.plan || 'sin plan'}. Estado: ${data.status || 'prospect'}. Vence: ${data.endDate || 'N/A'}. Deuda pendiente: S/ ${currentDebt.toFixed(2)}. Días vencido: ${daysOverdue !== null ? daysOverdue : 'N/A (activo)'}. Dieta Asignada: ${hasDiet}. Perfil Entrenamiento: ${profileStr}. Horario habitual: ${profile.horarioHabitual || 'N/A'}. Preferencia: ${profile.preferenciaClases || 'N/A'}. Constancia: ${profile.constancia || 'N/A'}. Estado motivacional: ${profile.estadoMotivacional || 'N/A'}. Seguimiento entrenamiento: ${trainingFollowupStr}. Perfil nutricional: ${nutritionProfileStr}`;
     }
 
     if (memberDoc && !memberDoc.empty && daysOverdue !== null && mentionsDeferredRenewalIntent(messageText)) {
@@ -1088,6 +1160,38 @@ export async function processMessage(db: any, phone: string, messageText: string
     const normalizedCurrent = normalizeText(messageText);
 
     const assistantPendingLink = historyTexts.some((text: string) => assistantPromisedPaymentLink(text));
+
+    if (mentionsVoucherIntent(messageText)) {
+        const voucherResult = await executeTool('send_payment_voucher', { phone });
+        if (voucherResult?.voucher) {
+            return voucherResult.voucher;
+        }
+        return 'No pude generar tu voucher en este momento. Si acabas de pagar, espera un instante y vuelve a pedirmelo, por favor.';
+    }
+
+    if (!mentionsMachineDayPass(messageText) && mentionsDebtPaymentIntent(messageText)) {
+        if (!memberDoc || memberDoc.empty) {
+            return 'Para generarte un link de deuda necesito ubicar tu registro primero. Escríbeme con el número que usaste al inscribirte o consulta en recepción, por favor.';
+        }
+
+        const memberData = memberDoc.docs[0].data();
+        const debt = Math.max(0, Number(memberData.debt) || 0);
+        if (debt <= 0) {
+            return `No tienes deuda pendiente${clientFirstName ? ` ${clientFirstName}` : ''}. Estás al día en MegaGym 😊`;
+        }
+
+        const paymentLink = await executeTool('generate_payment_link', {
+            phone,
+            planName: 'Pago de deuda',
+            paymentType: 'debt_payment'
+        });
+
+        if (paymentLink?.url) {
+            return `Listo${clientFirstName ? ` ${clientFirstName}` : ''}. Aqui tienes tu link para pagar tu deuda de S/ ${debt.toFixed(2)} por Culqi: ${paymentLink.url}`;
+        }
+
+        return 'Estoy teniendo un problema para generar el link de tu deuda en este momento. Intenta nuevamente en un instante, por favor.';
+    }
 
     if (!mentionsMachineDayPass(messageText) && (mentionsPaymentIntent(messageText) || (assistantPendingLink && mentionsFollowupForPendingLink(messageText)) || (mentionsReservationIntent(messageText) && !!extractDesiredTime(messageText)))) {
         const recentClassContext = [messageText, ...historyTexts].some((text) => mentionsGroupClassContext(text));
@@ -1186,6 +1290,7 @@ export async function processMessage(db: any, phone: string, messageText: string
        - daysOverdue entre 1 y 14: Acceso completo. Responde con normalidad sin ningún aviso de vencimiento ni links de pago. Solo si el cliente PIDE renovar o preguntar por su membresía, entonces ayúdalo.
        - daysOverdue >= 15: MODO ACCESO RESTRINGIDO. NO uses get_student_routine, get_student_diet, send_payment_voucher, get_payment_history ni check_member_status. Responde preguntas generales (horarios, precios generales, fitness, cualquier tema) con total normalidad. NO menciones que está bloqueado, NO generes links de pago, NO menciones el vencimiento a menos que el cliente lo pregunte directamente.
     5. REGLAS DE COBRO:
+       - Si el cliente quiere pagar su deuda, saldo pendiente o monto que debe, usa generate_payment_link con paymentType='debt_payment'. No lo renueves con ese link; ese link solo cancela o reduce deuda.
        - Si el cliente quiere pagar o renovar su membresía, usa generate_payment_link con paymentType='membership'.
        - Si el cliente quiere reservar o pagar una clase grupal (aeróbicos, clase grupal, FULLBODY), usa get_available_classes para ofrecer solo los horarios reales. Primero haz que elija uno. Luego usa generate_payment_link con paymentType='class_booking', classId y bookingDate. Explica que la reserva queda confirmada cuando Culqi apruebe el pago de S/ 6.
        - NO uses book_class directamente para una clase grupal pagada. La reserva se confirma después del pago.
@@ -1245,9 +1350,14 @@ export async function processMessage(db: any, phone: string, messageText: string
                 if (toolArgs.paymentType === 'class_booking') {
                     const scheduleLabel = formatClassTimeLabel(String(toolArgs.desiredTime || extractDesiredTime(String(toolArgs.planName || ''))));
                     directToolReply = `Listo${clientFirstName ? ` ${clientFirstName}` : ''}. Aqui tienes tu link real para reservar tu clase grupal${scheduleLabel ? ` a las ${scheduleLabel}` : ''}. Son S/ 6 y puedes pagar por Yape o tarjeta en Culqi: ${functionResult.url}`;
+                } else if (toolArgs.paymentType === 'debt_payment') {
+                    const debt = memberDoc && !memberDoc.empty ? Math.max(0, Number(memberDoc.docs[0].data().debt) || 0) : 0;
+                    directToolReply = `Listo${clientFirstName ? ` ${clientFirstName}` : ''}. Aqui tienes tu link real para pagar tu deuda${debt > 0 ? ` de S/ ${debt.toFixed(2)}` : ''}: ${functionResult.url}`;
                 } else {
                     directToolReply = `Listo${clientFirstName ? ` ${clientFirstName}` : ''}. Aqui tienes tu link real de pago para la membresia: ${functionResult.url}`;
                 }
+            } else if (toolCall.function.name === 'send_payment_voucher' && functionResult?.voucher) {
+                directToolReply = functionResult.voucher;
             }
             toolMessages.push({
                 tool_call_id: toolCall.id,

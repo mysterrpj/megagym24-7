@@ -22,6 +22,8 @@ interface Member {
     amountPaid?: number;
     planPrice?: number;
     debt?: number;
+    futureDebt?: number;
+    futureDebtStartDate?: string;
     expirationDate?: string;
     rawJoinDate?: any;
     expirationDateObj?: Date;
@@ -590,7 +592,7 @@ function CashPaymentModal({
     onSubmit: (amount: number, method: string, renewalData?: { plan: string; planPrice: number; startDate: Date }) => void;
 }) {
     const isOverdue = member.status === 'overdue';
-    const debt = Math.max(0, (member.planPrice || 0) - (member.amountPaid || 0));
+    const debt = Math.max(0, Number(member.debt) || 0);
     const [amount, setAmount] = useState(debt > 0 ? debt.toString() : '');
     const [method, setMethod] = useState('efectivo');
     const [loading, setLoading] = useState(false);
@@ -603,6 +605,8 @@ function CashPaymentModal({
     });
     const [startDateMode, setStartDateMode] = useState<'prev' | 'today' | 'custom'>('prev');
     const [customDate, setCustomDate] = useState(new Date().toISOString().split('T')[0]);
+    const parsedAmount = parseFloat(amount);
+    const exceedsDebt = debt > 0 && !isRenewing && !isNaN(parsedAmount) && parsedAmount > debt;
 
     // Auto-update amount when plan changes (only on renewal)
     useEffect(() => {
@@ -633,6 +637,7 @@ function CashPaymentModal({
         e.preventDefault();
         const parsed = parseFloat(amount);
         if (isNaN(parsed) || parsed <= 0) return;
+        if (debt > 0 && !isRenewing && parsed > debt) return;
         setLoading(true);
         let renewalData = undefined;
         if (isRenewing) {
@@ -727,12 +732,21 @@ function CashPaymentModal({
                             type="number"
                             step="0.01"
                             min="0"
+                            max={debt > 0 && !isRenewing ? debt : undefined}
                             value={amount}
                             onChange={e => setAmount(e.target.value)}
-                            className="bg-neutral-800 border-neutral-700 text-white"
+                            className={cn(
+                                "bg-neutral-800 text-white",
+                                exceedsDebt ? "border-red-500 focus:border-red-500" : "border-neutral-700"
+                            )}
                             placeholder="0.00"
                             required
                         />
+                        {exceedsDebt && (
+                            <p className="text-red-400 text-xs mt-1">
+                                Para pagar solo la deuda, el monto máximo es S/ {debt.toFixed(2)}. Si deseas cobrar más, marca Renovar membresía.
+                            </p>
+                        )}
                     </div>
                     <div>
                         <label className="text-gray-400 text-sm block mb-1">Método de pago</label>
@@ -746,7 +760,7 @@ function CashPaymentModal({
                             <option value="yape">Yape / Plin</option>
                         </select>
                     </div>
-                    <Button type="submit" disabled={loading} className="w-full bg-green-600 hover:bg-green-700">
+                    <Button type="submit" disabled={loading || exceedsDebt} className="w-full bg-green-600 hover:bg-green-700">
                         {loading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Banknote className="w-4 h-4 mr-2" />}
                         Registrar Pago
                     </Button>
@@ -1101,6 +1115,8 @@ export function MembersPage() {
                     amountPaid: data.amountPaid,
                     planPrice: data.planPrice,
                     debt: data.debt,
+                    futureDebt: data.futureDebt,
+                    futureDebtStartDate: data.futureDebtStartDate,
                     expirationDate,
                     expirationDateObj: expDateObj,
                     rawJoinDate: data.createdAt,
@@ -1156,24 +1172,42 @@ export function MembersPage() {
             const startStr = renewalData.startDate.toISOString().split('T')[0];
             const endStr = newEndDate.toISOString().split('T')[0];
             const newDebt = Math.max(0, renewalData.planPrice - amount);
+            const todayStart = new Date(today);
+            todayStart.setHours(0, 0, 0, 0);
+            const renewalStart = new Date(renewalData.startDate);
+            renewalStart.setHours(0, 0, 0, 0);
+            const isFutureRenewal = renewalStart > todayStart;
 
             updateData = {
                 status: 'active',
                 plan: renewalData.plan,
                 planPrice: renewalData.planPrice,
                 amountPaid: amount,
-                debt: newDebt,
+                debt: isFutureRenewal ? 0 : newDebt,
+                futureDebt: isFutureRenewal ? newDebt : 0,
+                futureDebtStartDate: isFutureRenewal ? startStr : '',
+                futureDebtPlan: isFutureRenewal ? renewalData.plan : '',
+                futureDebtPlanPrice: isFutureRenewal ? renewalData.planPrice : 0,
                 startDate: startStr,
                 endDate: endStr,
                 expirationDate: newEndDate,
-                payments: arrayUnion({ amount, method, date: today.toISOString() }),
+                payments: arrayUnion({
+                    amount,
+                    method,
+                    date: today.toISOString(),
+                    type: isFutureRenewal ? 'future_renewal_advance' : 'renewal_payment'
+                }),
                 updatedAt: serverTimestamp()
             };
         } else {
-            const planPrice = selectedMember.planPrice || 0;
             const prevPaid = selectedMember.amountPaid || 0;
+            const pendingDebt = Math.max(0, Number(selectedMember.debt) || 0);
+            if (pendingDebt > 0 && amount > pendingDebt) {
+                alert(`El pago de deuda no puede superar S/ ${pendingDebt.toFixed(2)}. Para cobrar más, usa Renovar membresía.`);
+                return;
+            }
             const newTotalPaid = prevPaid + amount;
-            const newDebt = Math.max(0, planPrice - newTotalPaid);
+            const newDebt = Math.max(0, pendingDebt - amount);
 
             updateData = {
                 status: 'active',
@@ -1400,11 +1434,19 @@ export function MembersPage() {
                                             </span>
                                             {(() => {
                                                 const debt = Number(member.debt ?? Math.max(0, Number(member.planPrice || 0) - Number(member.amountPaid || 0)));
-                                                return debt > 0 ? (
-                                                    <div className="mt-1">
+                                                const futureDebt = Number(member.futureDebt || 0);
+                                                return debt > 0 || futureDebt > 0 ? (
+                                                    <div className="mt-1 space-y-1">
+                                                        {debt > 0 && (
                                                         <span className="text-[10px] bg-red-500 text-white px-2 py-0.5 rounded-full font-bold">
                                                             Debe: S/ {debt.toFixed(2)}
                                                         </span>
+                                                        )}
+                                                        {futureDebt > 0 && (
+                                                            <span className="block text-[10px] bg-yellow-500/20 text-yellow-300 border border-yellow-500/30 px-2 py-0.5 rounded-full font-bold">
+                                                                Futuro: S/ {futureDebt.toFixed(2)} desde {member.futureDebtStartDate || member.expirationDate}
+                                                            </span>
+                                                        )}
                                                     </div>
                                                 ) : null;
                                             })()}

@@ -1,7 +1,8 @@
 interface PaymentLinkOptions {
-    paymentType?: 'membership' | 'class_booking';
+    paymentType?: 'membership' | 'class_booking' | 'debt_payment';
     classId?: string;
     bookingDate?: string;
+    amount?: number;
 }
 
 export async function generatePaymentLink(phone: string, planName: string, options: PaymentLinkOptions = {}) {
@@ -69,10 +70,19 @@ export async function generatePaymentLink(phone: string, planName: string, optio
 
     let amount = 7000;
     const normalizedPlan = planName?.toLowerCase() || '';
-    const paymentType = options.paymentType === 'class_booking' ? 'class_booking' : 'membership';
+    const paymentType = options.paymentType === 'class_booking'
+        ? 'class_booking'
+        : options.paymentType === 'debt_payment'
+            ? 'debt_payment'
+            : 'membership';
 
     if (paymentType === 'class_booking') {
         amount = 600;
+    } else if (paymentType === 'debt_payment') {
+        amount = Math.round((Number(options.amount) || 0) * 100);
+        if (amount <= 0) {
+            throw new Error('Debt payment amount must be greater than zero.');
+        }
     } else if (normalizedPlan.includes('2') || normalizedPlan.includes('dos')) {
         amount = 12000;
     } else if (normalizedPlan.includes('3') || normalizedPlan.includes('tres')) {
@@ -92,13 +102,14 @@ export async function generatePaymentLink(phone: string, planName: string, optio
 
     const order: any = await createCulqiOrder(
         amount,
-        `Plan ${planName || 'Mensual'} - Fit IA`,
+        paymentType === 'debt_payment' ? 'Pago de deuda - Fit IA' : `Plan ${planName || 'Mensual'} - Fit IA`,
         client,
         {
             phone: phone,
             planName: planName,
             source: 'whatsapp_ai',
             paymentType,
+            debtAmount: paymentType === 'debt_payment' ? String(amount / 100) : '',
             classId: options.classId || '',
             bookingDate: options.bookingDate || ''
         }

@@ -57,13 +57,14 @@ export const tools = [
         type: "function",
         function: {
             name: "generate_payment_link",
-            description: "Generate a payment link (Culqi) for a membership or a paid group class. Do not use this for gym machine day passes.",
+            description: "Generate a payment link (Culqi) for a membership, a pending debt, or a paid group class. Do not use this for gym machine day passes.",
             parameters: {
                 type: "object",
                 properties: {
                     phone: { type: "string", description: "User's phone number to link the payment" },
                     planName: { type: "string", description: "Name of the plan or class payment label" },
-                    paymentType: { type: "string", description: "Use 'membership' or 'class_booking'." },
+                    paymentType: { type: "string", description: "Use 'membership', 'debt_payment', or 'class_booking'." },
+                    amount: { type: "number", description: "Amount in soles. Required only for paymentType='debt_payment'." },
                     classId: { type: "string", description: "Required when paymentType is 'class_booking'." },
                     bookingDate: { type: "string", description: "Required when paymentType is 'class_booking'. Format YYYY-MM-DD." }
                 },
@@ -153,6 +154,7 @@ export async function executeTool(name: string, args: any) {
                 const { generatePaymentLink } = require('./paymentHandler');
                 const paymentUrl = await generatePaymentLink(args.phone, args.planName, {
                     paymentType: args.paymentType,
+                    amount: args.amount,
                     classId: args.classId,
                     bookingDate: args.bookingDate
                 });

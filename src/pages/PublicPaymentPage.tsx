@@ -139,11 +139,15 @@ export const PublicPaymentPage = () => {
                         <p className="text-zinc-400">
                             {paymentType === 'class_booking'
                                 ? <>Tu reserva para <span className="text-yellow-500 font-bold">{plan}</span> quedo confirmada.</>
+                                : paymentType === 'debt_payment'
+                                    ? <>Tu pago de deuda por <span className="text-yellow-500 font-bold">S/ {(amount / 100).toFixed(2)}</span> fue registrado.</>
                                 : <>Tu membresia <span className="text-yellow-500 font-bold">{plan}</span> ha sido activada.</>}
                         </p>
                         <p className="text-zinc-500 text-sm">
                             {paymentType === 'class_booking'
                                 ? `Te esperamos ${bookingDate ? `el ${bookingDate}` : 'en tu clase'}.`
+                                : paymentType === 'debt_payment'
+                                    ? 'Tu saldo pendiente se actualizara automaticamente.'
                                 : 'Ya puedes disfrutar de todos los beneficios del gimnasio.'}
                         </p>
                         <p className="text-zinc-600 text-xs mt-2">
@@ -181,7 +185,7 @@ export const PublicPaymentPage = () => {
                 <CardContent className="space-y-6">
                     <div className="p-4 bg-zinc-800/50 rounded-lg border border-zinc-700">
                         <div className="flex justify-between items-center mb-2">
-                            <span className="text-zinc-400">{paymentType === 'class_booking' ? 'Clase:' : 'Plan:'}</span>
+                            <span className="text-zinc-400">{paymentType === 'class_booking' ? 'Clase:' : paymentType === 'debt_payment' ? 'Concepto:' : 'Plan:'}</span>
                             <span className="text-white font-semibold">{plan}</span>
                         </div>
                         <div className="flex justify-between items-center">

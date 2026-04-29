@@ -146,6 +146,61 @@ async function createPaidClassBooking(db: any, phone: string, classId: string, b
     });
 }
 
+async function applyDebtPayment(db: any, adminInner: any, phone: string, paymentInfo: any) {
+    const memberDoc = await findMemberByPhone(db, phone);
+    if (!memberDoc) {
+        throw new Error(`No member found for phone: ${phone}`);
+    }
+
+    const paidAmount = Math.max(0, Number(paymentInfo.amount) || 0);
+    if (paidAmount <= 0) {
+        throw new Error('Invalid debt payment amount.');
+    }
+
+    const memberRef = memberDoc.ref;
+    const memberData = memberDoc.data() || {};
+    const currentDebt = Math.max(0, Number(memberData.debt) || 0);
+    const newDebt = Math.max(0, currentDebt - paidAmount);
+    const prevPaid = Number(memberData.amountPaid) || 0;
+    const nowIso = new Date().toISOString();
+
+    await memberRef.update({
+        debt: newDebt,
+        amountPaid: prevPaid + paidAmount,
+        paymentApprovedAt: nowIso,
+        culqiChargeId: paymentInfo.chargeId || memberData.culqiChargeId || '',
+        culqiOrderId: paymentInfo.orderId || memberData.culqiOrderId || '',
+        payments: adminInner.firestore.FieldValue.arrayUnion({
+            amount: paidAmount,
+            method: paymentInfo.method || 'Culqi',
+            type: 'debt_payment',
+            date: nowIso,
+            chargeId: paymentInfo.chargeId || '',
+            orderId: paymentInfo.orderId || ''
+        }),
+        updatedAt: adminInner.firestore.FieldValue.serverTimestamp()
+    });
+
+    await db.collection('payments').add({
+        memberName: memberData.name || 'Cliente',
+        memberId: memberDoc.id,
+        concept: 'Pago de deuda',
+        amount: paidAmount,
+        method: paymentInfo.method || 'Culqi',
+        invoiceType: 'Boleta',
+        date: new Date(),
+        createdAt: adminInner.firestore.FieldValue.serverTimestamp()
+    });
+
+    return {
+        memberName: memberData.name || 'Cliente',
+        phone: memberData.phone || phone,
+        paidAmount,
+        previousDebt: currentDebt,
+        newDebt
+    };
+}
+
 export const twilioWebhookWhatsapp = functions
     .runWith({ memory: '1GB', timeoutSeconds: 120 })
     .https.onRequest(async (req, res) => {
@@ -235,6 +290,23 @@ export const culqiWebhook = functions
                             from: 'whatsapp:+51907935299',
                             to: `whatsapp:${booking.phone}`,
                             body: `¡Listo ${firstName}! 😊 Tu reserva para ${booking.className} con ${booking.instructor} quedó confirmada para el ${bookingDate}${classTimeLabel}. Pago recibido: S/ ${(order.amount / 100).toFixed(2)} 💪`
+                        });
+                    } else if (paymentType === 'debt_payment') {
+                        const debtPayment = await applyDebtPayment(db, adminInner, phone, {
+                            amount: order.amount / 100,
+                            method: 'Culqi',
+                            orderId: order.id
+                        });
+
+                        const twilioClientObj = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+                        const firstName = debtPayment.memberName.split(' ')[0];
+                        const remainingText = debtPayment.newDebt > 0
+                            ? `Te queda un saldo pendiente de S/ ${debtPayment.newDebt.toFixed(2)}.`
+                            : 'Tu deuda quedo cancelada.';
+                        await twilioClientObj.messages.create({
+                            from: 'whatsapp:+51907935299',
+                            to: `whatsapp:${debtPayment.phone}`,
+                            body: `Listo ${firstName}. Recibimos tu pago de deuda por S/ ${debtPayment.paidAmount.toFixed(2)}. ${remainingText}`
                         });
                     } else {
                         const memberDoc = await findMemberByPhone(db, phone);
@@ -336,7 +408,25 @@ export const createCulqiCharge = functions
                     if (!adminInner.apps.length) adminInner.initializeApp();
                     const db = adminInner.firestore();
 
-                    if (paymentType === 'class_booking') {
+                    if (paymentType === 'debt_payment') {
+                        const debtPayment = await applyDebtPayment(db, adminInner, phone, {
+                            amount: amount / 100,
+                            method: 'Culqi',
+                            chargeId: charge.id,
+                            orderId: orderId || ''
+                        });
+
+                        const twilioClientObj = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+                        const firstName = debtPayment.memberName.split(' ')[0];
+                        const remainingText = debtPayment.newDebt > 0
+                            ? `Te queda un saldo pendiente de S/ ${debtPayment.newDebt.toFixed(2)}.`
+                            : 'Tu deuda quedo cancelada.';
+                        await twilioClientObj.messages.create({
+                            from: 'whatsapp:+51907935299',
+                            to: `whatsapp:${debtPayment.phone}`,
+                            body: `Listo ${firstName}. Recibimos tu pago de deuda por S/ ${debtPayment.paidAmount.toFixed(2)}. ${remainingText}`
+                        });
+                    } else if (paymentType === 'class_booking') {
                         const booking = await createPaidClassBooking(db, phone, String(classId || ''), String(bookingDate || ''), {
                             amount: amount / 100,
                             method: 'Culqi',
@@ -400,10 +490,10 @@ export const createCulqiCharge = functions
 export const generateCulqiLink = functions
     .runWith({ memory: '512MB' })
     .https.onRequest(async (req, res) => {
-        const { phone, planName, paymentType, classId, bookingDate } = req.body;
+        const { phone, planName, paymentType, classId, bookingDate, amount } = req.body;
         const { generatePaymentLink } = require('./tools/paymentHandler');
         try {
-            const url = await generatePaymentLink(phone, planName, { paymentType, classId, bookingDate });
+            const url = await generatePaymentLink(phone, planName, { paymentType, classId, bookingDate, amount });
             res.status(200).json({ url });
         } catch (e: any) {
             res.status(500).json({ error: e.message });
