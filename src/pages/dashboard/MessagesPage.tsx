@@ -35,6 +35,62 @@ function normalizePhone(phone: string) {
     return digits.slice(-9);
 }
 
+function getMessageDate(timestamp: any): Date | null {
+    if (!timestamp) return null;
+    const date = timestamp?.toDate ? timestamp.toDate() : new Date(timestamp);
+    return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function isSameDay(a: Date, b: Date) {
+    return a.getFullYear() === b.getFullYear()
+        && a.getMonth() === b.getMonth()
+        && a.getDate() === b.getDate();
+}
+
+function formatConversationTime(timestamp: any) {
+    const date = getMessageDate(timestamp);
+    if (!date) return '';
+
+    const now = new Date();
+    const yesterday = new Date();
+    yesterday.setDate(now.getDate() - 1);
+
+    if (isSameDay(date, now)) {
+        return date.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
+    }
+
+    if (isSameDay(date, yesterday)) {
+        return 'Ayer';
+    }
+
+    return date.toLocaleDateString('es-PE', { day: '2-digit', month: 'short' });
+}
+
+function formatMessageTime(timestamp: any) {
+    const date = getMessageDate(timestamp);
+    if (!date) return '';
+    return date.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
+}
+
+function formatDateSeparator(timestamp: any) {
+    const date = getMessageDate(timestamp);
+    if (!date) return '';
+
+    const now = new Date();
+    const yesterday = new Date();
+    yesterday.setDate(now.getDate() - 1);
+
+    if (isSameDay(date, now)) return 'Hoy';
+    if (isSameDay(date, yesterday)) return 'Ayer';
+
+    return date.toLocaleDateString('es-PE', {
+        weekday: 'long',
+        day: '2-digit',
+        month: 'long',
+        year: 'numeric'
+    });
+}
+
 export function MessagesPage() {
     const [conversations, setConversations] = useState<Conversation[]>([]);
     const [selectedPhone, setSelectedPhone] = useState<string | null>(null);
@@ -131,7 +187,7 @@ export function MessagesPage() {
                                 <div className="flex justify-between items-baseline mb-1">
                                     <h3 className="font-semibold text-white truncate">{conv.name || conv.phone}</h3>
                                     <span className="text-xs text-gray-500">
-                                        {conv.timestamp?.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                        {formatConversationTime(conv.timestamp)}
                                     </span>
                                 </div>
                                 <p className="text-sm text-gray-400 truncate">{conv.lastMessage}</p>
@@ -171,27 +227,42 @@ export function MessagesPage() {
                         </div>
 
                         <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-black/20">
-                            {messages.map((msg) => (
-                                <div
-                                    key={msg.id}
-                                    className={cn(
-                                        "flex",
-                                        msg.direction === 'outbound' ? "justify-end" : "justify-start"
-                                    )}
-                                >
-                                    <div className={cn(
-                                        "max-w-[70%] rounded-2xl p-3 px-4 text-sm leading-relaxed",
-                                        msg.direction === 'outbound'
-                                            ? "bg-green-600 text-white rounded-tr-sm"
-                                            : "bg-neutral-800 text-white rounded-tl-sm"
-                                    )}>
-                                        <p>{msg.content}</p>
-                                        <span className="text-[10px] opacity-70 block text-right mt-1">
-                                            {msg.timestamp?.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                        </span>
+                            {messages.map((msg, index) => {
+                                const previousMessage = messages[index - 1];
+                                const currentDate = getMessageDate(msg.timestamp);
+                                const previousDate = getMessageDate(previousMessage?.timestamp);
+                                const showDateSeparator = currentDate && (!previousDate || !isSameDay(currentDate, previousDate));
+
+                                return (
+                                    <div key={msg.id}>
+                                        {showDateSeparator && (
+                                            <div className="flex justify-center my-3">
+                                                <span className="rounded-full bg-neutral-800 px-3 py-1 text-xs font-medium text-gray-300 capitalize">
+                                                    {formatDateSeparator(msg.timestamp)}
+                                                </span>
+                                            </div>
+                                        )}
+                                        <div
+                                            className={cn(
+                                                "flex",
+                                                msg.direction === 'outbound' ? "justify-end" : "justify-start"
+                                            )}
+                                        >
+                                            <div className={cn(
+                                                "max-w-[70%] rounded-2xl p-3 px-4 text-sm leading-relaxed",
+                                                msg.direction === 'outbound'
+                                                    ? "bg-green-600 text-white rounded-tr-sm"
+                                                    : "bg-neutral-800 text-white rounded-tl-sm"
+                                            )}>
+                                                <p>{msg.content}</p>
+                                                <span className="text-[10px] opacity-70 block text-right mt-1">
+                                                    {formatMessageTime(msg.timestamp)}
+                                                </span>
+                                            </div>
+                                        </div>
                                     </div>
-                                </div>
-                            ))}
+                                );
+                            })}
                         </div>
 
                         <div className="p-4 bg-neutral-900 border-t border-neutral-800">
