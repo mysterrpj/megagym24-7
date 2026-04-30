@@ -51,6 +51,7 @@ Por eso, la pantalla `Mensajes` queda minimalista:
 - Revisar el comportamiento cuando el pago se aprueba pero el cupo ya no existe.
 - Definir politica futura de cancelacion/reprogramacion sin devolucion.
 - Profundizar memoria de cliente para progreso y riesgo de abandono.
+- Optimizar costos de IA con seleccion inteligente de modelo: usar `gpt-4o` para pagos, deuda, voucher, membresias y casos criticos; usar `gpt-4o-mini` para saludos, rutina/dieta por link, dudas simples, preguntas personales y conversaciones largas. Si se quiere volver rapido a `gpt-4o` para todo, configurar `OPENAI_DEFAULT_CHAT_MODEL=gpt-4o` y redesplegar funciones.
 - Migrar configuracion de `functions.config()` a parametros antes de marzo 2027.
 
 ## Pendiente futuro - Nutricion

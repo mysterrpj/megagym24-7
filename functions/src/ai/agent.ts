@@ -14,6 +14,47 @@ export async function processMessage(phone: string, messageText: string) {
     }
     const db = admin.firestore();
 
+    const normalizeText = (value: string) => String(value || '')
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '');
+
+    const selectChatModel = (text: string) => {
+        const normalized = normalizeText(text);
+        const criticalTokens = [
+            'pagar',
+            'pago',
+            'pagos',
+            'link',
+            'deuda',
+            'debo',
+            'saldo',
+            'voucher',
+            'comprobante',
+            'recibo',
+            'boleta',
+            'membresia',
+            'mensualidad',
+            'renovar',
+            'renovacion',
+            'vence',
+            'vencimiento',
+            'clase grupal',
+            'fullbody',
+            'aerobico',
+            'aerobicos',
+            'reserva',
+            'reservar',
+            'culqi',
+            'yape',
+            'tarjeta'
+        ];
+
+        return criticalTokens.some((token) => normalized.includes(token))
+            ? (process.env.OPENAI_CRITICAL_CHAT_MODEL || 'gpt-4o')
+            : (process.env.OPENAI_DEFAULT_CHAT_MODEL || 'gpt-4o-mini');
+    };
+
     // 1. Get History
     const historySnapshot = await db.collection('messages')
         .where('phone', '==', phone)
@@ -69,8 +110,11 @@ export async function processMessage(phone: string, messageText: string) {
     `;
 
     // 2. Call OpenAI
+    const chatModel = selectChatModel(messageText);
+    console.log(`Sofia legacy chat model selected: ${chatModel}`);
+
     const response = await openai.chat.completions.create({
-        model: 'gpt-4o',
+        model: chatModel,
         messages: [
             { role: 'system', content: systemPrompt },
             ...messages
@@ -100,7 +144,7 @@ export async function processMessage(phone: string, messageText: string) {
 
         // Get final response after tool execution
         const secondResponse = await openai.chat.completions.create({
-            model: 'gpt-4o',
+            model: chatModel,
             messages: [
                 { role: 'system', content: systemPrompt },
                 ...toolMessages

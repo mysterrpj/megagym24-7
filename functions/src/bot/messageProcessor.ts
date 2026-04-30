@@ -68,6 +68,45 @@ function normalizeText(value: string) {
         .replace(/[\u0300-\u036f]/g, '');
 }
 
+const CRITICAL_CHAT_MODEL = process.env.OPENAI_CRITICAL_CHAT_MODEL || 'gpt-4o';
+const DEFAULT_CHAT_MODEL = process.env.OPENAI_DEFAULT_CHAT_MODEL || 'gpt-4o-mini';
+
+function selectChatModel(messageText: string) {
+    const normalized = normalizeText(messageText);
+    const criticalTokens = [
+        'pagar',
+        'pago',
+        'pagos',
+        'link',
+        'deuda',
+        'debo',
+        'saldo',
+        'voucher',
+        'comprobante',
+        'recibo',
+        'boleta',
+        'membresia',
+        'mensualidad',
+        'renovar',
+        'renovacion',
+        'vence',
+        'vencimiento',
+        'clase grupal',
+        'fullbody',
+        'aerobico',
+        'aerobicos',
+        'reserva',
+        'reservar',
+        'culqi',
+        'yape',
+        'tarjeta'
+    ];
+
+    return criticalTokens.some((token) => normalized.includes(token))
+        ? CRITICAL_CHAT_MODEL
+        : DEFAULT_CHAT_MODEL;
+}
+
 function extractDesiredTime(text: string) {
     const normalized = normalizeText(text);
 
@@ -179,6 +218,44 @@ function mentionsPaymentIntent(text: string) {
     const normalized = normalizeText(text);
     return ['quiero pagar', 'pasame el link', 'pagar por yape', 'pagar por tarjeta', 'mandame el link', 'manda el link', 'enviame el link', 'quiero el link', 'link de pago', 'por yape', 'por tarjeta']
         .some((token) => normalized.includes(token));
+}
+
+function mentionsGymHoursIntent(text: string) {
+    const normalized = normalizeText(text);
+    return [
+        'horario',
+        'hora abren',
+        'a que hora abren',
+        'a que hora abre',
+        'estan abierto',
+        'esta abierto',
+        'esta abierta',
+        'abren en la manana',
+        'abren en la mañana',
+        'hora cierran',
+        'a que hora cierran',
+        'atencion'
+    ].some((token) => normalized.includes(token));
+}
+
+function mentionsMembershipStatusIntent(text: string) {
+    const normalized = normalizeText(text);
+    const asksMembership = ['membresia', 'mensualidad', 'mi plan'].some((token) => normalized.includes(token));
+    const asksStatus = ['activa', 'activo', 'vigente', 'vencida', 'vencido', 'vence', 'estado'].some((token) => normalized.includes(token));
+    return asksMembership && asksStatus;
+}
+
+function mentionsWrongLinkComplaint(text: string) {
+    const normalized = normalizeText(text);
+    return [
+        'no quiero eso',
+        'no pedi eso',
+        'no te pedi',
+        'por que me mandas ese link',
+        'por que me envias ese link',
+        'no quiero link',
+        'no quiero reservar'
+    ].some((token) => normalized.includes(token));
 }
 
 function mentionsVoucherIntent(text: string) {
@@ -1160,6 +1237,31 @@ export async function processMessage(db: any, phone: string, messageText: string
     const normalizedCurrent = normalizeText(messageText);
 
     const assistantPendingLink = historyTexts.some((text: string) => assistantPromisedPaymentLink(text));
+    const recentClassContext = [messageText, ...historyTexts.slice(-4)].some((text) => mentionsGroupClassContext(text));
+    const allowsClassBookingFromCurrentMessage = mentionsGroupClassContext(messageText)
+        || ((mentionsFollowupForPendingLink(messageText) || !!extractDesiredTime(messageText)) && recentClassContext);
+
+    if (mentionsWrongLinkComplaint(messageText)) {
+        return `Tienes razon${clientFirstName ? ` ${clientFirstName}` : ''}, disculpa. Me quedé con el tema anterior de la clase y no debí enviarte ese link. Dime qué necesitas ahora y te respondo directo.`;
+    }
+
+    if (mentionsMembershipStatusIntent(messageText)) {
+        if (!memberDoc || memberDoc.empty) {
+            return 'No encuentro tu membresia con este numero. Escribeme desde el WhatsApp registrado o consulta en recepcion para revisarlo.';
+        }
+
+        const memberData = memberDoc.docs[0].data();
+        const currentDebt = Math.max(0, Number(memberData.debt) || 0);
+        if (daysOverdue !== null && daysOverdue > 0) {
+            return `No${clientFirstName ? ` ${clientFirstName}` : ''}, tu membresia no esta activa. Vencio el ${memberData.endDate || 'fecha no registrada'}${daysOverdue ? `, hace ${daysOverdue} dia(s)` : ''}.${currentDebt > 0 ? ` Ademas tienes una deuda pendiente de S/ ${currentDebt.toFixed(2)}.` : ''}`;
+        }
+
+        return `Si${clientFirstName ? ` ${clientFirstName}` : ''}, tu membresia esta activa. Vence el ${memberData.endDate || 'fecha no registrada'}.${currentDebt > 0 ? ` Tienes una deuda pendiente de S/ ${currentDebt.toFixed(2)}.` : ''}`;
+    }
+
+    if (mentionsGymHoursIntent(messageText) && !mentionsGroupClassContext(messageText)) {
+        return `El gimnasio abre de lunes a viernes de 6:00 AM a 10:00 PM, sabados de 6:00 AM a 6:00 PM y domingos de 6:00 AM a 12:00 PM${clientFirstName ? `, ${clientFirstName}` : ''}.`;
+    }
 
     if (mentionsVoucherIntent(messageText)) {
         const voucherResult = await executeTool('send_payment_voucher', { phone });
@@ -1193,8 +1295,7 @@ export async function processMessage(db: any, phone: string, messageText: string
         return 'Estoy teniendo un problema para generar el link de tu deuda en este momento. Intenta nuevamente en un instante, por favor.';
     }
 
-    if (!mentionsMachineDayPass(messageText) && (mentionsPaymentIntent(messageText) || (assistantPendingLink && mentionsFollowupForPendingLink(messageText)) || (mentionsReservationIntent(messageText) && !!extractDesiredTime(messageText)))) {
-        const recentClassContext = [messageText, ...historyTexts].some((text) => mentionsGroupClassContext(text));
+    if (!mentionsMachineDayPass(messageText) && allowsClassBookingFromCurrentMessage && (mentionsPaymentIntent(messageText) || (assistantPendingLink && mentionsFollowupForPendingLink(messageText)) || mentionsReservationIntent(messageText) || !!extractDesiredTime(messageText))) {
         if (recentClassContext) {
             const desiredTime = findDesiredTimeFromContext(messageText, historyTexts);
             if (!desiredTime) {
@@ -1316,8 +1417,11 @@ export async function processMessage(db: any, phone: string, messageText: string
        - Para preguntas técnicas de entrenamiento (técnica, ejercicios, conceptos de fitness, nutrición): responde en máximo 2-3 oraciones con lo esencial. Siempre termina ofreciendo profundizar: "¿Quieres saber [opción A] o [opción B]? 🔥" en lugar de soltar todo de golpe.
        - Para el resto de mensajes: máx 3 oraciones, emojis (💪, 😊, 🔥) y termina con una pregunta motivadora.${profileQuestionInstruction}`;
 
+    const chatModel = selectChatModel(messageText);
+    console.log(`Sofia chat model selected: ${chatModel}`);
+
     const response = await openai.chat.completions.create({
-        model: 'gpt-4o',
+        model: chatModel,
         messages: [{ role: 'system', content: systemPrompt }, ...messages],
         tools: tools as any
     });
@@ -1329,6 +1433,16 @@ export async function processMessage(db: any, phone: string, messageText: string
         let directToolReply = '';
         for (const toolCall of responseMessage.tool_calls) {
             const toolArgs = JSON.parse(toolCall.function.arguments || '{}');
+            if (toolCall.function.name === 'generate_payment_link' && toolArgs.paymentType === 'class_booking' && !allowsClassBookingFromCurrentMessage) {
+                toolMessages.push({
+                    tool_call_id: toolCall.id,
+                    role: 'tool',
+                    content: JSON.stringify({
+                        error: 'No generar link de clase: el mensaje actual no pidio reservar o pagar clase grupal.'
+                    })
+                });
+                continue;
+            }
             if (toolCall.function.name === 'generate_payment_link' && toolArgs.paymentType === 'class_booking') {
                 const desiredTimeFromContext = findDesiredTimeFromContext(messageText, historyTexts);
                 if (desiredTimeFromContext) {
@@ -1371,7 +1485,7 @@ export async function processMessage(db: any, phone: string, messageText: string
         }
 
         const secondResponse = await openai.chat.completions.create({
-            model: 'gpt-4o',
+            model: chatModel,
             messages: [
                 { role: 'system', content: systemPrompt },
                 ...toolMessages
