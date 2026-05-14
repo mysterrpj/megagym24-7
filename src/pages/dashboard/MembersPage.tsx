@@ -786,6 +786,7 @@ function RoutinesModal({ member, onClose }: { member: Member; onClose: () => voi
     const [routines, setRoutines] = useState<RoutineAssignment[]>([]);
     const [loading, setLoading] = useState(true);
     const [updating, setUpdating] = useState<string | null>(null);
+    const [selectedRoutineIds, setSelectedRoutineIds] = useState<Set<string>>(new Set());
 
     useEffect(() => {
         const fetchRoutines = async () => {
@@ -835,6 +836,7 @@ function RoutinesModal({ member, onClose }: { member: Member; onClose: () => voi
                 });
 
                 setRoutines(rows);
+                setSelectedRoutineIds(new Set());
             } catch (e) {
                 console.error('Error cargando rutinas:', e);
             } finally {
@@ -861,12 +863,50 @@ function RoutinesModal({ member, onClose }: { member: Member; onClose: () => voi
         try {
             await deleteDoc(doc(db, 'studentRoutineAssignments', routine.id));
             setRoutines(prev => prev.filter(r => r.id !== routine.id));
+            setSelectedRoutineIds(prev => {
+                const next = new Set(prev);
+                next.delete(routine.id);
+                return next;
+            });
         } finally {
             setUpdating(null);
         }
     };
 
     const activeCount = routines.filter(r => r.status === 'active').length;
+    const selectedCount = selectedRoutineIds.size;
+    const allSelected = routines.length > 0 && selectedCount === routines.length;
+
+    const toggleSelectAll = () => {
+        setSelectedRoutineIds(allSelected ? new Set() : new Set(routines.map(r => r.id)));
+    };
+
+    const toggleRoutineSelection = (routineId: string) => {
+        setSelectedRoutineIds(prev => {
+            const next = new Set(prev);
+            if (next.has(routineId)) {
+                next.delete(routineId);
+            } else {
+                next.add(routineId);
+            }
+            return next;
+        });
+    };
+
+    const deleteSelectedRoutines = async () => {
+        if (selectedCount === 0) return;
+        if (!confirm(`¿Eliminar ${selectedCount} rutina${selectedCount !== 1 ? 's' : ''} seleccionada${selectedCount !== 1 ? 's' : ''} de ${member.name}?`)) return;
+
+        setUpdating('bulk-delete');
+        try {
+            const idsToDelete = Array.from(selectedRoutineIds);
+            await Promise.all(idsToDelete.map(id => deleteDoc(doc(db, 'studentRoutineAssignments', id))));
+            setRoutines(prev => prev.filter(r => !selectedRoutineIds.has(r.id)));
+            setSelectedRoutineIds(new Set());
+        } finally {
+            setUpdating(null);
+        }
+    };
 
     return (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
@@ -898,7 +938,30 @@ function RoutinesModal({ member, onClose }: { member: Member; onClose: () => voi
                             Este alumno no tiene rutinas asignadas aún.
                         </p>
                     ) : (
-                        routines.map(routine => (
+                        <>
+                            <div className="flex items-center justify-between gap-3 rounded-lg border border-neutral-800 bg-neutral-950/60 px-4 py-3">
+                                <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer select-none">
+                                    <input
+                                        type="checkbox"
+                                        checked={allSelected}
+                                        onChange={toggleSelectAll}
+                                        disabled={updating !== null}
+                                        className="h-4 w-4 rounded border-neutral-700 bg-neutral-900 accent-yellow-500"
+                                    />
+                                    Seleccionar todas
+                                </label>
+                                <Button
+                                    type="button"
+                                    onClick={deleteSelectedRoutines}
+                                    disabled={selectedCount === 0 || updating !== null}
+                                    className="h-8 bg-red-600 hover:bg-red-700 disabled:bg-neutral-800 disabled:text-gray-500"
+                                >
+                                    {updating === 'bulk-delete' ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Trash className="w-4 h-4 mr-2" />}
+                                    Eliminar seleccionadas
+                                </Button>
+                            </div>
+
+                            {routines.map(routine => (
                             <div
                                 key={routine.id}
                                 className={cn(
@@ -908,39 +971,49 @@ function RoutinesModal({ member, onClose }: { member: Member; onClose: () => voi
                                         : "border-neutral-700 bg-neutral-800/50 opacity-60"
                                 )}
                             >
-                                <div className="flex-1 min-w-0">
-                                    <div className="flex items-center gap-2 mb-1">
-                                        <span className={cn(
-                                            "text-xs font-bold px-2 py-0.5 rounded-full",
-                                            routine.status === 'active'
-                                                ? "bg-green-500/20 text-green-400"
-                                                : "bg-neutral-700 text-gray-500"
-                                        )}>
-                                            {routine.status === 'active' ? 'Activa' : 'Inactiva'}
-                                        </span>
-                                        <span className="text-gray-500 text-xs">
-                                            {routine.createdAt?.toDate
-                                                ? routine.createdAt.toDate().toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' })
-                                                : 'Reciente'}
-                                        </span>
+                                <div className="flex items-start gap-3 flex-1 min-w-0">
+                                    <input
+                                        type="checkbox"
+                                        checked={selectedRoutineIds.has(routine.id)}
+                                        onChange={() => toggleRoutineSelection(routine.id)}
+                                        disabled={updating !== null}
+                                        aria-label={`Seleccionar ${routine.routineTitle}`}
+                                        className="mt-1 h-4 w-4 rounded border-neutral-700 bg-neutral-900 accent-yellow-500 shrink-0"
+                                    />
+                                    <div className="flex-1 min-w-0">
+                                        <div className="flex items-center gap-2 mb-1">
+                                            <span className={cn(
+                                                "text-xs font-bold px-2 py-0.5 rounded-full",
+                                                routine.status === 'active'
+                                                    ? "bg-green-500/20 text-green-400"
+                                                    : "bg-neutral-700 text-gray-500"
+                                            )}>
+                                                {routine.status === 'active' ? 'Activa' : 'Inactiva'}
+                                            </span>
+                                            <span className="text-gray-500 text-xs">
+                                                {routine.createdAt?.toDate
+                                                    ? routine.createdAt.toDate().toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' })
+                                                    : 'Reciente'}
+                                            </span>
+                                        </div>
+                                        <p className="text-white text-sm font-medium truncate">{routine.routineTitle}</p>
+                                        {routine.routineUrl && (
+                                            <a
+                                                href={routine.routineUrl}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className="text-blue-400 hover:text-blue-300 text-xs flex items-center gap-1 mt-1 truncate"
+                                            >
+                                                <ExternalLink className="w-3 h-3 shrink-0" />
+                                                Ver rutina
+                                            </a>
+                                        )}
                                     </div>
-                                    <p className="text-white text-sm font-medium truncate">{routine.routineTitle}</p>
-                                    {routine.routineUrl && (
-                                        <a
-                                            href={routine.routineUrl}
-                                            target="_blank"
-                                            rel="noreferrer"
-                                            className="text-blue-400 hover:text-blue-300 text-xs flex items-center gap-1 mt-1 truncate"
-                                        >
-                                            <ExternalLink className="w-3 h-3 shrink-0" />
-                                            Ver rutina
-                                        </a>
-                                    )}
                                 </div>
                                 <div className="flex items-center gap-1 shrink-0">
                                     <button
                                         onClick={() => toggleStatus(routine)}
-                                        disabled={updating === routine.id}
+                                        disabled={updating !== null}
                                         title={routine.status === 'active' ? 'Desactivar' : 'Activar'}
                                         className="p-1.5 rounded-md hover:bg-neutral-700 transition-colors"
                                     >
@@ -953,7 +1026,7 @@ function RoutinesModal({ member, onClose }: { member: Member; onClose: () => voi
                                     </button>
                                     <button
                                         onClick={() => deleteRoutine(routine)}
-                                        disabled={updating === routine.id}
+                                        disabled={updating !== null}
                                         title="Eliminar"
                                         className="p-1.5 rounded-md hover:bg-neutral-700 transition-colors text-red-500 hover:text-red-400"
                                     >
@@ -961,7 +1034,8 @@ function RoutinesModal({ member, onClose }: { member: Member; onClose: () => voi
                                     </button>
                                 </div>
                             </div>
-                        ))
+                            ))}
+                        </>
                     )}
                 </div>
 
