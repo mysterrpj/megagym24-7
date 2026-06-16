@@ -84,7 +84,7 @@ El proyecto es un sistema para la gestión de un gimnasio ("MegaGym") con un bot
 | `email` | string | Email |
 | `dni` | string | DNI |
 | `plan` | string | Nombre del plan (ej. "Plan Mensual") |
-| `status` | string | `active`, `pending`, `overdue`, `prospect` |
+| `status` | string | `active`, `overdue`, `inactive` |
 | `startDate` | string | Fecha de inicio (YYYY-MM-DD) |
 | `endDate` | string | Fecha de fin (YYYY-MM-DD) |
 | `expirationDate` | Timestamp | Fecha de vencimiento (Firestore Timestamp) |
@@ -94,6 +94,17 @@ El proyecto es un sistema para la gestión de un gimnasio ("MegaGym") con un bot
 | `diet` | string | Dieta asignada por el administrador (texto libre) |
 | `trainingProfile` | object | Perfil de entrenamiento: `{objetivo, nivel, diasSemana, limitaciones, notasTrainer}` |
 | `payments` | array | Historial de pagos |
+| `membershipHistory` | array | Historial de membresias por periodo: plan, inicio, vencimiento, costo, pagado, deuda y pagos asociados |
+| `adminNotes` | string | Notas administrativas internas; no se envian al cliente |
+
+Notas operativas:
+
+- `createdAt`/fecha historica del documento representa **Ingreso al gimnasio**.
+- `startDate` representa **Inicio de membresia** actual.
+- `endDate` representa **Vencimiento** de la membresia actual.
+- En el dashboard de miembros solo deben usarse los estados Activo, Vencido e Inactivo.
+- Un miembro vencido por mas de 30 dias pasa a Inactivo, salvo que se edite manualmente.
+- Los miembros Inactivos permanecen en la lista, pero no deben recibir recordatorios automaticos de WhatsApp.
 
 ## Reglas Estrictas para Modificar el Prompt (`messageProcessor.ts`)
 
@@ -146,6 +157,17 @@ Función cron `membershipReminder` en `index.ts`, corre todos los días a las **
 
 - **3 días antes del vencimiento:** Envía aviso amigable por WhatsApp vía Twilio. Sin link de pago (ese lo genera Sofía cuando el cliente escribe).
 - **Recordatorio de deuda:** Cada 7 días desde `startDate`, si `debt > 0`, envía recordatorio del saldo pendiente. Se detiene automáticamente cuando `debt` llega a 0.
+- **Miembros inactivos:** No reciben recordatorios automaticos de vencimiento, renovacion pendiente ni deuda.
+
+### ✅ Dashboard de miembros y pagos (2026-06-16)
+
+- El modal de `Editar Miembro` separa `Ingreso al gimnasio`, `Inicio de membresia` y `Vencimiento`.
+- Al cambiar plan o inicio de membresia, el vencimiento se recalcula automaticamente segun la duracion del plan.
+- Existe `Plan Interdiario` con costo S/50.
+- Las renovaciones crean/actualizan `membershipHistory` para no mezclar membresias antiguas con nuevas.
+- El campo `adminNotes` guarda notas internas del cliente y no debe exponerse al bot como respuesta al cliente.
+- En `Pagos y Facturacion`, cada pago con monto mayor a cero permite `Ver / reenviar voucher` por WhatsApp.
+- Los pagos o renovaciones de S/0 no deben generar voucher. Si el cliente pide voucher sin haber pagado, Sofia debe indicar que todavia no hay pago registrado.
 
 ### ✅ Personalidad de Sofía mejorada (2026-04-13)
 
@@ -198,7 +220,7 @@ Los siguientes archivos son documentación histórica del proyecto, ya completad
   - respuestas normales del bot (`outbound`);
   - recordatorios automÃ¡ticos de `membershipReminder`.
 - La pantalla `Mensajes` del dashboard ya muestra el nombre real del cliente resolviÃ©ndolo desde `members` por telÃ©fono normalizado.
-- Existe una Cloud Function `sendManualWhatsAppMessage`, pero el dashboard **no la usa actualmente**.
+- Existe una Cloud Function `sendManualWhatsAppMessage`; el dashboard la usa para reenviar vouchers desde `Pagos y Facturacion`.
 - DecisiÃ³n actual del producto: el nÃºmero de Twilio queda como canal principal del bot automÃ¡tico y el panel de `Mensajes` queda en modo visualizaciÃ³n/historial.
 
 ### Recordatorios automÃ¡ticos

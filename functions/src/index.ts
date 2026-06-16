@@ -557,6 +557,7 @@ export const membershipReminder = functions
             const name = (member.name || 'amigo').split(' ')[0];
             const phone = member.phone;
             if (!phone) continue;
+            if ((member.status || '') === 'inactive') continue;
 
             const msg = `¡Hola ${name}! 😊 Te aviso que tu membresía en MegaGym vence en 3 días. ¡Renueva a tiempo y no pierdas el ritmo! 💪🔥`;
             try {
@@ -580,7 +581,7 @@ export const membershipReminder = functions
             const phone = member.phone;
             const endDate = String(member.endDate || '');
             if (!phone || !endDate) continue;
-            if ((member.status || '') === 'prospect') continue;
+            if (['inactive', 'prospect'].includes(member.status || '')) continue;
             if (Number(member.debt) > 0) continue;
 
             const name = (member.name || 'amigo').split(' ')[0];
@@ -647,6 +648,7 @@ export const membershipReminder = functions
             const member = doc.data();
             const phone = member.phone;
             if (!phone || !member.startDate) continue;
+            if ((member.status || '') === 'inactive') continue;
 
             const diffDays = diffLimaDays(member.startDate, todayStr);
 

@@ -19,11 +19,14 @@ URL actual:
 ## Funcionalidades principales
 
 - Gestión de miembros y membresías
+- Estados de miembros limitados a Activo, Vencido e Inactivo
+- Historial de membresías por periodo con costo, pagado, deuda y pagos asociados
+- Notas administrativas internas por miembro
 - Historial de mensajes del bot en dashboard
-- Recordatorios automáticos de vencimiento y deuda
+- Recordatorios automáticos de vencimiento y deuda, excluyendo miembros inactivos
 - Consulta de rutinas y dietas por WhatsApp
 - Generación de links de pago Culqi
-- Envío de voucher/comprobante
+- Envío de voucher/comprobante por WhatsApp y reenvío desde el panel de pagos
 - Transcripción de audios de WhatsApp
 - Módulo de clases conectado a Firestore
 - Reserva pagada de clases grupales por WhatsApp

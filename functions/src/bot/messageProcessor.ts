@@ -778,14 +778,21 @@ export async function executeTool(name: string, args: any) {
                 if (!snap) return { error: "No se encontró al miembro con ese número." };
                 const member = snap.docs[0].data();
 
-                const payments = Array.isArray(member.payments) ? member.payments : [];
-                if (payments.length === 0) return { error: "No se encontraron pagos registrados para este miembro." };
+                const allPayments = Array.isArray(member.payments) ? member.payments : [];
+                const payments = allPayments.filter((payment: any) => Number(payment?.amount) > 0);
+                const debt = Math.max(0, Number(member.debt) || 0);
+                if (payments.length === 0) {
+                    return {
+                        error: debt > 0
+                            ? `Aun no tienes voucher de pago porque todavia no se registro ningun pago. Tienes una deuda pendiente de S/ ${debt.toFixed(2)}.`
+                            : "Aun no tienes voucher de pago porque todavia no se registro ningun pago."
+                    };
+                }
                 const lastPayment = payments[payments.length - 1];
                 const lastPaymentDate = getPaymentDateString(lastPayment);
                 const recentPayments = payments.filter((payment: any) => getPaymentDateString(payment) === lastPaymentDate);
                 const hasFutureAdvanceInGroup = recentPayments.some((payment: any) => payment?.type === 'future_renewal_advance');
                 const totalReceived = recentPayments.reduce((sum: number, payment: any) => sum + (Number(payment.amount) || 0), 0);
-                const debt = Math.max(0, Number(member.debt) || 0);
                 const futureDebt = Math.max(0, Number(member.futureDebt) || 0);
 
                 // Resolver fecha de inicio
@@ -863,7 +870,8 @@ export async function executeTool(name: string, args: any) {
                 const snap = await findMember(dbInner, args.phone);
                 if (!snap) return { found: false, message: 'No se encontró al miembro.' };
                 const member = snap.docs[0].data();
-                const payments = member.payments || [];
+                const payments = (Array.isArray(member.payments) ? member.payments : [])
+                    .filter((payment: any) => Number(payment?.amount) > 0);
                 if (payments.length === 0) return { found: false, message: 'No hay pagos registrados.' };
                 const total = payments.reduce((sum: number, p: any) => sum + (Number(p.amount) || 0), 0);
                 const list = payments.map((p: any, i: number) => {
@@ -1267,6 +1275,9 @@ export async function processMessage(db: any, phone: string, messageText: string
         const voucherResult = await executeTool('send_payment_voucher', { phone });
         if (voucherResult?.voucher) {
             return voucherResult.voucher;
+        }
+        if (voucherResult?.error) {
+            return voucherResult.error;
         }
         return 'No pude generar tu voucher en este momento. Si acabas de pagar, espera un instante y vuelve a pedirmelo, por favor.';
     }

@@ -6,7 +6,7 @@ import { Search, UserPlus, Mail, Phone, MoreHorizontal, ChevronLeft, ChevronRigh
 import { cn } from '@/lib/utils';
 import { httpsCallable } from 'firebase/functions';
 import { functions, db } from '@/lib/firebase';
-import { collection, onSnapshot, query, orderBy, where, addDoc, updateDoc, doc, deleteDoc, getDocs, serverTimestamp, arrayUnion } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, where, addDoc, updateDoc, doc, deleteDoc, getDoc, getDocs, serverTimestamp, arrayUnion } from 'firebase/firestore';
 
 // Type definitions
 interface Member {
@@ -17,24 +17,124 @@ interface Member {
     phone: string;
     plan: string;
     joinDate: string;
-    status: 'active' | 'pending' | 'overdue' | 'prospect';
+    membershipStartDate?: string;
+    membershipStartDateInput?: string;
+    status: 'active' | 'overdue' | 'inactive';
     avatarColor: string;
     amountPaid?: number;
     planPrice?: number;
     debt?: number;
     futureDebt?: number;
     futureDebtStartDate?: string;
+    futureDebtPlan?: string;
+    futureDebtPlanPrice?: number;
     expirationDate?: string;
     rawJoinDate?: any;
     expirationDateObj?: Date;
+    membershipHistory?: MembershipPeriod[];
+    adminNotes?: string;
     diet?: string;
 }
 
+interface MembershipPaymentRecord {
+    amount: number;
+    method: string;
+    date: string;
+    type: string;
+}
+
+interface MembershipPeriod {
+    id: string;
+    plan: string;
+    startDate: string;
+    endDate: string;
+    planPrice: number;
+    amountPaid: number;
+    debt: number;
+    status: 'active' | 'closed' | 'future';
+    payments: MembershipPaymentRecord[];
+    createdAt: string;
+}
+
 const PLAN_OPTIONS = [
+    { name: 'Plan Interdiario', price: 50, days: 30 },
     { name: 'Plan Mensual', price: 70, days: 30 },
     { name: 'Plan Bimestral', price: 120, days: 60 },
     { name: 'Plan Trimestral', price: 150, days: 90 },
 ];
+
+const formatLocalDateInput = (date: Date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+};
+
+const parseLocalDateInput = (value?: string) => {
+    if (!value) return null;
+    const [year, month, day] = value.split('-').map(Number);
+    if (!year || !month || !day) return null;
+    const date = new Date(year, month - 1, day);
+    return isNaN(date.getTime()) ? null : date;
+};
+
+const getPlanOption = (planName: string) => PLAN_OPTIONS.find(plan => plan.name === planName);
+
+const getPlanPrice = (planName: string, fallback = 70) => getPlanOption(planName)?.price ?? fallback;
+
+const getPlanDays = (planName: string) => getPlanOption(planName)?.days ?? 365;
+
+const normalizeMembershipHistory = (history: any): MembershipPeriod[] => {
+    return Array.isArray(history) ? history.map((item) => ({
+        id: String(item.id || `${item.startDate || 'inicio'}_${item.endDate || 'fin'}`),
+        plan: String(item.plan || 'Membresía'),
+        startDate: String(item.startDate || ''),
+        endDate: String(item.endDate || ''),
+        planPrice: Number(item.planPrice) || 0,
+        amountPaid: Number(item.amountPaid) || 0,
+        debt: Math.max(0, Number(item.debt) || 0),
+        status: (item.status === 'closed' || item.status === 'future') ? item.status : 'active',
+        payments: Array.isArray(item.payments) ? item.payments.filter((payment: any) => Number(payment?.amount) > 0).map((payment: any) => ({
+            amount: Number(payment.amount) || 0,
+            method: String(payment.method || 'Efectivo'),
+            date: String(payment.date || ''),
+            type: String(payment.type || 'payment')
+        })) : [],
+        createdAt: String(item.createdAt || item.startDate || '')
+    })) : [];
+};
+
+const buildLegacyMembershipPeriod = (member: Member, debt: number): MembershipPeriod => {
+    const planPrice = Number(member.planPrice) || getPlanPrice(member.plan);
+    const amountPaid = Math.max(0, planPrice - debt);
+    return {
+        id: `legacy_${member.id}_${member.membershipStartDateInput || Date.now()}`,
+        plan: member.plan || 'Membresía',
+        startDate: member.membershipStartDateInput || '',
+        endDate: member.expirationDateObj ? formatLocalDateInput(member.expirationDateObj) : '',
+        planPrice,
+        amountPaid,
+        debt,
+        status: debt > 0 ? 'active' : 'closed',
+        payments: [],
+        createdAt: new Date().toISOString()
+    };
+};
+
+const getMembershipStatus = (expirationDate: Date, storedStatus?: string): Member['status'] => {
+    if (storedStatus === 'inactive') return 'inactive';
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const expiration = new Date(expirationDate);
+    expiration.setHours(0, 0, 0, 0);
+
+    if (expiration >= today) return 'active';
+
+    const daysOverdue = Math.floor((today.getTime() - expiration.getTime()) / (1000 * 60 * 60 * 24));
+    return daysOverdue > 30 ? 'inactive' : 'overdue';
+};
 
 const TRAINING_TEMPLATES = [
     { value: '', label: 'Sin perfil' },
@@ -71,7 +171,7 @@ function MemberModal({
     const [email, setEmail] = useState(member?.email || '');
     const [phone, setPhone] = useState(member?.phone || '');
     const [plan, setPlan] = useState(member?.plan || 'Plan Mensual');
-    const [status, setStatus] = useState<'active' | 'pending' | 'prospect' | 'overdue'>(member?.status === 'overdue' ? 'overdue' : (member?.status || 'active'));
+    const [status, setStatus] = useState<Member['status']>(member?.status || 'active');
 
     // Training profile
     const [showProfile, setShowProfile] = useState(!!(member as any)?.trainingProfile?.objetivo);
@@ -81,6 +181,7 @@ function MemberModal({
     const [diasSemana, setDiasSemana] = useState((member as any)?.trainingProfile?.diasSemana?.toString() || '');
     const [limitaciones, setLimitaciones] = useState((member as any)?.trainingProfile?.limitaciones || '');
     const [notasTrainer, setNotasTrainer] = useState((member as any)?.trainingProfile?.notasTrainer || '');
+    const [adminNotes, setAdminNotes] = useState(member?.adminNotes || '');
     const [diet, setDiet] = useState(member?.diet || '');
 
     // Payment fields
@@ -90,26 +191,33 @@ function MemberModal({
     // Join Date State (New)
     const [joinDate, setJoinDate] = useState(() => {
         if (member?.rawJoinDate?.toDate) {
-            return member.rawJoinDate.toDate().toISOString().split('T')[0];
+            return formatLocalDateInput(member.rawJoinDate.toDate());
         } else if (member?.joinDate && member.joinDate !== 'Reciente') {
             // Try to parse '16 feb 2026' back to date? Tricky with locale. 
             // Better strictly use rawJoinDate if available, or Today.
             // If we are editing but no raw date (shouldn't happen), assume today or leave blank?
             // Let's assume Today for new, and safe fallback.
-            return new Date().toISOString().split('T')[0];
+            return formatLocalDateInput(new Date());
         }
-        return new Date().toISOString().split('T')[0];
+        return formatLocalDateInput(new Date());
+    });
+
+    const [membershipStartDate, setMembershipStartDate] = useState(() => {
+        if (member?.membershipStartDateInput) return member.membershipStartDateInput;
+        if (member?.rawJoinDate?.toDate) return formatLocalDateInput(member.rawJoinDate.toDate());
+        return formatLocalDateInput(new Date());
     });
 
     const [expirationDate, setExpirationDate] = useState(() => {
         if (member?.expirationDateObj) {
-            return member.expirationDateObj.toISOString().split('T')[0];
+            return formatLocalDateInput(member.expirationDateObj);
         }
         // Default: Next Month
         const d = new Date();
         d.setMonth(d.getMonth() + 1);
-        return d.toISOString().split('T')[0];
+        return formatLocalDateInput(d);
     });
+    const [expirationEditedManually, setExpirationEditedManually] = useState(false);
 
     // Update expiration date if plan changes (only if not editing an existing member initially to avoid overwrite, 
     // BUT user asked for auto-calc. Let's make it recalculate on plan change).
@@ -127,46 +235,34 @@ function MemberModal({
         }
     }, [trainingTemplate]);
 
-    // Auto-update expiration date based on PLAN and JOIN DATE (solo al crear, no al editar)
+    // Auto-update expiration date based on plan and current membership start date.
     useEffect(() => {
-        if (member) return; // No recalcular si estamos editando
-        if (!joinDate || joinDate.length < 10) return;
-        const [y, m, d] = joinDate.split('-').map(Number);
-        if (!y || !m || !d) return;
-        const baseDate = new Date(y, m - 1, d);
-        if (isNaN(baseDate.getTime())) return;
+        if (expirationEditedManually) return;
+        if (!membershipStartDate || membershipStartDate.length < 10) return;
+        const baseDate = parseLocalDateInput(membershipStartDate);
+        if (!baseDate) return;
 
         const newDate = new Date(baseDate);
-        if (plan.includes('Trimestral')) newDate.setMonth(newDate.getMonth() + 3);
-        else if (plan.includes('Mensual')) newDate.setMonth(newDate.getMonth() + 1);
-        else newDate.setFullYear(newDate.getFullYear() + 1);
+        newDate.setDate(newDate.getDate() + getPlanDays(plan));
 
         if (!isNaN(newDate.getTime())) {
-            setExpirationDate(newDate.toISOString().split('T')[0]);
+            setExpirationDate(formatLocalDateInput(newDate));
         }
-    }, [plan, joinDate, member]);
+    }, [plan, membershipStartDate, expirationEditedManually]);
 
     // Update price based on plan selection
     useEffect(() => {
-        if (!member) { // Only on create
-            if (plan.includes('Trimestral')) setPlanPrice('150');
-            else if (plan.includes('Mensual')) setPlanPrice('80');
-            else setPlanPrice('80');
-        }
-    }, [plan, member]);
+        setPlanPrice(getPlanPrice(plan).toString());
+    }, [plan]);
 
     // Auto-update status based on expiration date
     useEffect(() => {
         if (!expirationDate || expirationDate.length < 10) return;
-        const [y, m, d] = expirationDate.split('-').map(Number);
-        if (!y || !m || !d) return;
-        const expDate = new Date(y, m - 1, d);
-        if (isNaN(expDate.getTime())) return;
-        expDate.setHours(0, 0, 0, 0);
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        setStatus(expDate < today ? 'overdue' : 'active');
-    }, [expirationDate]);
+        const expDate = parseLocalDateInput(expirationDate);
+        if (!expDate) return;
+        if (status === 'inactive') return;
+        setStatus(getMembershipStatus(expDate, status));
+    }, [expirationDate, status]);
 
     const debt = Math.max(0, (parseFloat(planPrice) || 0) - (parseFloat(amountPaid) || 0));
 
@@ -179,7 +275,9 @@ function MemberModal({
             planPrice: parseFloat(planPrice) || 0,
             expirationDateStr: expirationDate,
             joinDateStr: joinDate,
+            membershipStartDateStr: membershipStartDate,
             debt: debt,
+            adminNotes,
             diet: diet,
             trainingProfile: objetivo ? { objetivo, nivel, diasSemana: parseInt(diasSemana) || 0, limitaciones, notasTrainer } : null
         });
@@ -269,22 +367,23 @@ function MemberModal({
                                 onChange={(e) => setPlan(e.target.value)}
                                 className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:border-green-500 transition-colors appearance-none"
                             >
-                                <option>Plan Mensual</option>
-                                <option>Plan Bimestral</option>
-                                <option>Plan Trimestral</option>
+                                {PLAN_OPTIONS.map(planOption => (
+                                    <option key={planOption.name} value={planOption.name}>
+                                        {planOption.name}
+                                    </option>
+                                ))}
                             </select>
                         </div>
                         <div>
                             <label className="block text-sm text-gray-400 mb-2">Estado</label>
                             <select
                                 value={status}
-                                onChange={(e) => setStatus(e.target.value as any)}
+                                onChange={(e) => setStatus(e.target.value as Member['status'])}
                                 className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:border-green-500 transition-colors appearance-none"
                             >
                                 <option value="active">Activo</option>
-                                <option value="pending">Pendiente</option>
-                                <option value="prospect">Prospecto</option>
                                 <option value="overdue">Vencido</option>
+                                <option value="inactive">Inactivo</option>
                             </select>
                         </div>
                     </div>
@@ -292,9 +391,9 @@ function MemberModal({
                 </div>
 
                 {/* Dates */}
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div>
-                        <label className="block text-sm text-gray-400 mb-2">Fecha de Ingreso</label>
+                        <label className="block text-sm text-gray-400 mb-2">Ingreso al gimnasio</label>
                         <input
                             type="date"
                             value={joinDate}
@@ -303,11 +402,23 @@ function MemberModal({
                         />
                     </div>
                     <div>
-                        <label className="block text-sm text-gray-400 mb-2">Fecha de Vencimiento</label>
+                        <label className="block text-sm text-gray-400 mb-2">Inicio de membresía</label>
+                        <input
+                            type="date"
+                            value={membershipStartDate}
+                            onChange={(e) => setMembershipStartDate(e.target.value)}
+                            className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:border-green-500 transition-colors"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm text-gray-400 mb-2">Vencimiento</label>
                         <input
                             type="date"
                             value={expirationDate}
-                            onChange={(e) => setExpirationDate(e.target.value)}
+                            onChange={(e) => {
+                                setExpirationEditedManually(true);
+                                setExpirationDate(e.target.value);
+                            }}
                             className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:border-green-500 transition-colors"
                         />
                     </div>
@@ -341,6 +452,56 @@ function MemberModal({
                             <p className="text-xs text-red-500 font-bold">⚠️ Deuda Pendiente: S/ {debt.toFixed(2)}</p>
                         </div>
                     )}
+                </div>
+
+                {member?.membershipHistory && member.membershipHistory.length > 0 && (
+                    <div className="space-y-2">
+                        <p className="text-sm text-gray-400">Historial de membresías</p>
+                        <div className="max-h-40 overflow-y-auto space-y-2 pr-1">
+                            {[...member.membershipHistory].reverse().map((period) => (
+                                <div key={period.id} className="rounded-lg border border-neutral-700 bg-neutral-800/40 p-3">
+                                    <div className="flex items-start justify-between gap-3">
+                                        <div>
+                                            <p className="text-sm font-semibold text-white">{period.plan}</p>
+                                            <p className="text-xs text-gray-400">{period.startDate || 'Sin inicio'} - {period.endDate || 'Sin vencimiento'}</p>
+                                        </div>
+                                        <span className={cn(
+                                            "rounded-full px-2 py-0.5 text-[10px] font-bold",
+                                            period.debt > 0 ? "bg-red-500/15 text-red-400" : "bg-green-500/15 text-green-400"
+                                        )}>
+                                            {period.debt > 0 ? `Debe S/ ${period.debt.toFixed(2)}` : 'Pagado'}
+                                        </span>
+                                    </div>
+                                    <div className="mt-2 grid grid-cols-3 gap-2 text-[11px] text-gray-400">
+                                        <span>Costo S/ {period.planPrice.toFixed(2)}</span>
+                                        <span>Pagado S/ {period.amountPaid.toFixed(2)}</span>
+                                        <span>{period.payments.length} pago{period.payments.length !== 1 ? 's' : ''}</span>
+                                    </div>
+                                    {period.payments.length > 0 && (
+                                        <div className="mt-2 space-y-1 border-t border-neutral-700 pt-2">
+                                            {period.payments.map((payment, index) => (
+                                                <p key={`${period.id}-${index}`} className="text-[11px] text-gray-400">
+                                                    S/ {payment.amount.toFixed(2)} - {payment.method} - {new Date(payment.date).toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' })}
+                                                </p>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                <div className="mt-3">
+                    <label className="block text-sm text-gray-400 mb-2">Notas administrativas</label>
+                    <textarea
+                        value={adminNotes}
+                        onChange={(e) => setAdminNotes(e.target.value)}
+                        placeholder="Ej. Clienta antigua, dejar entrenar hasta viernes, paga por Yape..."
+                        rows={2}
+                        className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-green-500"
+                    />
+                    <p className="mt-1 text-[11px] text-gray-500">Solo para uso interno. No se muestra al cliente.</p>
                 </div>
 
                 {/* Diet Section */}
@@ -464,9 +625,14 @@ function PaymentModal({
     member: Member;
     onClose: () => void;
 }) {
-    const [selectedPlan, setSelectedPlan] = useState(member.plan);
-    const [amount, setAmount] = useState('80'); // Default amount
+    const [selectedPlan, setSelectedPlan] = useState(getPlanOption(member.plan) ? member.plan : 'Plan Mensual');
+    const [amount, setAmount] = useState(getPlanPrice(getPlanOption(member.plan) ? member.plan : 'Plan Mensual', member.planPrice || 70).toString());
     const [loading, setLoading] = useState(false);
+
+    useEffect(() => {
+        const planOption = getPlanOption(selectedPlan);
+        if (planOption) setAmount(planOption.price.toString());
+    }, [selectedPlan]);
 
     const handlePayment = async () => {
         setLoading(true);
@@ -535,9 +701,11 @@ function PaymentModal({
                             onChange={(e) => setSelectedPlan(e.target.value)}
                             className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:border-green-500 transition-colors appearance-none"
                         >
-                            <option>Plan Mensual</option>
-                            <option>Plan Bimestral</option>
-                            <option>Plan Trimestral</option>
+                            {PLAN_OPTIONS.map(planOption => (
+                                <option key={planOption.name} value={planOption.name}>
+                                    {planOption.name}
+                                </option>
+                            ))}
                             <option>Clase Individual</option>
                         </select>
                     </div>
@@ -589,67 +757,75 @@ function CashPaymentModal({
 }: {
     member: Member;
     onClose: () => void;
-    onSubmit: (amount: number, method: string, renewalData?: { plan: string; planPrice: number; startDate: Date }) => void;
+    onSubmit: (amount: number, method: string, renewalData?: { plan: string; planPrice: number; startDate: Date }) => Promise<void>;
 }) {
-    const isOverdue = member.status === 'overdue';
+    const needsRenewal = member.status === 'overdue' || member.status === 'inactive';
     const debt = Math.max(0, Number(member.debt) || 0);
     const [amount, setAmount] = useState(debt > 0 ? debt.toString() : '');
     const [method, setMethod] = useState('efectivo');
     const [loading, setLoading] = useState(false);
 
     // Renewal fields
-    const [isRenewing, setIsRenewing] = useState(isOverdue);
+    const [isRenewing, setIsRenewing] = useState(needsRenewal && debt <= 0);
     const [selectedPlan, setSelectedPlan] = useState(() => {
         const match = PLAN_OPTIONS.find(p => p.name === member.plan);
         return match ? match.name : 'Plan Mensual';
     });
     const [startDateMode, setStartDateMode] = useState<'prev' | 'today' | 'custom'>('prev');
-    const [customDate, setCustomDate] = useState(new Date().toISOString().split('T')[0]);
+    const [customDate, setCustomDate] = useState(formatLocalDateInput(new Date()));
     const parsedAmount = parseFloat(amount);
+    const normalizedAmount = isNaN(parsedAmount) ? 0 : parsedAmount;
+    const isZeroRenewal = isRenewing && normalizedAmount === 0;
     const exceedsDebt = debt > 0 && !isRenewing && !isNaN(parsedAmount) && parsedAmount > debt;
 
     // Auto-update amount when plan changes (only on renewal)
     useEffect(() => {
         if (!isRenewing) return;
-        const planOption = PLAN_OPTIONS.find(p => p.name === selectedPlan);
+        const planOption = getPlanOption(selectedPlan);
         if (planOption) setAmount(planOption.price.toString());
     }, [selectedPlan, isRenewing]);
 
     const getStartDate = (): Date => {
         if (startDateMode === 'prev' && member.expirationDateObj) return member.expirationDateObj;
         if (startDateMode === 'custom') {
-            const [y, m, d] = customDate.split('-').map(Number);
-            return new Date(y, m - 1, d);
+            return parseLocalDateInput(customDate) || new Date();
         }
         return new Date();
     };
 
     const previewEndDate = (() => {
         if (!isRenewing) return null;
-        const planOption = PLAN_OPTIONS.find(p => p.name === selectedPlan);
+        const planOption = getPlanOption(selectedPlan);
         const start = getStartDate();
         const end = new Date(start);
-        if (planOption) end.setDate(end.getDate() + planOption.days);
+        end.setDate(end.getDate() + (planOption?.days ?? getPlanDays(selectedPlan)));
         return end.toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' });
     })();
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         const parsed = parseFloat(amount);
-        if (isNaN(parsed) || parsed <= 0) return;
+        if (isNaN(parsed) || parsed < 0) return;
+        if (!isRenewing && parsed <= 0) return;
         if (debt > 0 && !isRenewing && parsed > debt) return;
         setLoading(true);
         let renewalData = undefined;
         if (isRenewing) {
-            const planOption = PLAN_OPTIONS.find(p => p.name === selectedPlan);
+            const planOption = getPlanOption(selectedPlan);
             renewalData = {
                 plan: selectedPlan,
-                planPrice: planOption?.price || (member.planPrice || 70),
+                planPrice: planOption?.price || getPlanPrice(selectedPlan, member.planPrice || 70),
                 startDate: getStartDate()
             };
         }
-        await onSubmit(parsed, method, renewalData);
-        setLoading(false);
+        try {
+            await onSubmit(parsed, method, renewalData);
+        } catch (error) {
+            console.error("Error registering cash payment:", error);
+            alert("No se pudo registrar el pago. Intenta nuevamente.");
+        } finally {
+            setLoading(false);
+        }
     };
 
     return (
@@ -762,7 +938,7 @@ function CashPaymentModal({
                     </div>
                     <Button type="submit" disabled={loading || exceedsDebt} className="w-full bg-green-600 hover:bg-green-700">
                         {loading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Banknote className="w-4 h-4 mr-2" />}
-                        Registrar Pago
+                        {isZeroRenewal ? 'Registrar renovación con deuda' : 'Registrar Pago'}
                     </Button>
                 </form>
             </div>
@@ -1051,10 +1227,12 @@ function RoutinesModal({ member, onClose }: { member: Member; onClose: () => voi
 
 function MemberActionsMenu({
     member,
-    onAction
+    onAction,
+    isDeleting = false
 }: {
     member: Member;
-    onAction: (action: 'payment' | 'cashPayment' | 'edit' | 'delete' | 'routines', member: Member) => void
+    onAction: (action: 'payment' | 'cashPayment' | 'edit' | 'delete' | 'routines', member: Member) => void;
+    isDeleting?: boolean;
 }) {
     const [isOpen, setIsOpen] = useState(false);
     const menuRef = useRef<HTMLDivElement>(null);
@@ -1117,10 +1295,11 @@ function MemberActionsMenu({
                     </button>
                     <button
                         onClick={() => handleClick('delete')}
-                        className="w-full text-left px-3 py-2 text-sm text-red-500 hover:bg-neutral-800 flex items-center gap-2"
+                        disabled={isDeleting}
+                        className="w-full text-left px-3 py-2 text-sm text-red-500 hover:bg-neutral-800 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                        <Trash className="w-4 h-4" />
-                        Eliminar
+                        {isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash className="w-4 h-4" />}
+                        {isDeleting ? 'Eliminando...' : 'Eliminar'}
                     </button>
                 </div>
             )}
@@ -1131,8 +1310,9 @@ function MemberActionsMenu({
 export function MembersPage() {
     const [members, setMembers] = useState<Member[]>([]);
     const [searchTerm, setSearchTerm] = useState('');
-    const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'pending' | 'overdue' | 'prospect'>('all');
+    const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'overdue' | 'inactive'>('all');
     const [loading, setLoading] = useState(true);
+    const [deletingMemberId, setDeletingMemberId] = useState<string | null>(null);
 
     // Modal State
     const [modalMode, setModalMode] = useState<'create' | 'edit' | 'none'>('none');
@@ -1170,11 +1350,11 @@ export function MembersPage() {
                 }
 
                 expirationDate = expDateObj.toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' });
+                const membershipStartDateObj = parseLocalDateInput(data.startDate) || created;
+                const membershipStartDate = membershipStartDateObj.toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' });
 
-                // Si está activo pero ya venció, mostrar como vencido
-                const now = new Date();
-                const storedStatus = data.status || 'prospect';
-                const computedStatus = (storedStatus === 'active' && expDateObj < now) ? 'overdue' : storedStatus;
+                const storedStatus = data.status || 'active';
+                const computedStatus = getMembershipStatus(expDateObj, storedStatus);
 
                 return {
                     id: doc.id,
@@ -1184,6 +1364,8 @@ export function MembersPage() {
                     phone: data.phone || '',
                     plan: data.plan || '',
                     joinDate: data.createdAt?.toDate().toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' }) || 'Reciente',
+                    membershipStartDate,
+                    membershipStartDateInput: data.startDate || formatLocalDateInput(membershipStartDateObj),
                     status: computedStatus as Member['status'],
                     avatarColor: `bg-${['green', 'blue', 'purple', 'orange', 'pink'][Math.floor(Math.random() * 5)]}-600`,
                     amountPaid: data.amountPaid,
@@ -1191,9 +1373,13 @@ export function MembersPage() {
                     debt: data.debt,
                     futureDebt: data.futureDebt,
                     futureDebtStartDate: data.futureDebtStartDate,
+                    futureDebtPlan: data.futureDebtPlan,
+                    futureDebtPlanPrice: data.futureDebtPlanPrice,
                     expirationDate,
                     expirationDateObj: expDateObj,
                     rawJoinDate: data.createdAt,
+                    membershipHistory: normalizeMembershipHistory(data.membershipHistory),
+                    adminNotes: data.adminNotes || '',
                     diet: data.diet || ''
                 };
             });
@@ -1220,7 +1406,13 @@ export function MembersPage() {
             setModalMode('edit');
         } else if (action === 'delete') {
             if (confirm(`¿Estás seguro de que quieres eliminar a ${member.name}?`)) {
-                deleteDoc(doc(db, 'members', member.id));
+                setDeletingMemberId(member.id);
+                deleteDoc(doc(db, 'members', member.id))
+                    .catch((error) => {
+                        console.error("Error deleting member:", error);
+                        alert("No se pudo eliminar el miembro. Intenta nuevamente.");
+                    })
+                    .finally(() => setDeletingMemberId(null));
             }
         }
     };
@@ -1228,6 +1420,9 @@ export function MembersPage() {
     const handleCashPayment = async (amount: number, method: string, renewalData?: { plan: string; planPrice: number; startDate: Date }) => {
         if (!selectedMember) return;
         const memberRef = doc(db, 'members', selectedMember.id);
+        const memberSnap = await getDoc(memberRef);
+        const currentMemberData = memberSnap.exists() ? memberSnap.data() : {};
+        const currentHistory = normalizeMembershipHistory(currentMemberData.membershipHistory);
         const today = new Date();
 
         const methodMap: Record<string, string> = {
@@ -1239,18 +1434,38 @@ export function MembersPage() {
         let updateData: Record<string, any>;
 
         if (renewalData) {
-            const planOption = PLAN_OPTIONS.find(p => p.name === renewalData.plan);
             const newEndDate = new Date(renewalData.startDate);
-            if (planOption) newEndDate.setDate(newEndDate.getDate() + planOption.days);
+            newEndDate.setDate(newEndDate.getDate() + getPlanDays(renewalData.plan));
 
-            const startStr = renewalData.startDate.toISOString().split('T')[0];
-            const endStr = newEndDate.toISOString().split('T')[0];
+            const startStr = formatLocalDateInput(renewalData.startDate);
+            const endStr = formatLocalDateInput(newEndDate);
             const newDebt = Math.max(0, renewalData.planPrice - amount);
             const todayStart = new Date(today);
             todayStart.setHours(0, 0, 0, 0);
             const renewalStart = new Date(renewalData.startDate);
             renewalStart.setHours(0, 0, 0, 0);
             const isFutureRenewal = renewalStart > todayStart;
+            const renewalPayment = amount > 0 ? [{
+                amount,
+                method,
+                date: today.toISOString(),
+                type: isFutureRenewal ? 'future_renewal_advance' : 'renewal_payment'
+            }] : [];
+            const nextHistory: MembershipPeriod[] = [
+                ...currentHistory.map((period) => period.status === 'active' ? { ...period, status: 'closed' as const } : period),
+                {
+                    id: `membership_${selectedMember.id}_${startStr}_${Date.now()}`,
+                    plan: renewalData.plan,
+                    startDate: startStr,
+                    endDate: endStr,
+                    planPrice: renewalData.planPrice,
+                    amountPaid: amount,
+                    debt: newDebt,
+                    status: isFutureRenewal ? 'future' : 'active',
+                    payments: renewalPayment,
+                    createdAt: today.toISOString()
+                }
+            ];
 
             updateData = {
                 status: 'active',
@@ -1265,12 +1480,15 @@ export function MembersPage() {
                 startDate: startStr,
                 endDate: endStr,
                 expirationDate: newEndDate,
-                payments: arrayUnion({
-                    amount,
-                    method,
-                    date: today.toISOString(),
-                    type: isFutureRenewal ? 'future_renewal_advance' : 'renewal_payment'
-                }),
+                membershipHistory: nextHistory,
+                ...(amount > 0 ? {
+                    payments: arrayUnion({
+                        amount,
+                        method,
+                        date: today.toISOString(),
+                        type: isFutureRenewal ? 'future_renewal_advance' : 'renewal_payment'
+                    })
+                } : {}),
                 updatedAt: serverTimestamp()
             };
         } else {
@@ -1282,28 +1500,73 @@ export function MembersPage() {
             }
             const newTotalPaid = prevPaid + amount;
             const newDebt = Math.max(0, pendingDebt - amount);
+            let nextHistory = currentHistory.length > 0 ? [...currentHistory] : [buildLegacyMembershipPeriod(selectedMember, pendingDebt)];
+            const activeIndex = [...nextHistory].reverse().findIndex((period) => period.status === 'active' || period.status === 'future');
+            const historyIndex = activeIndex >= 0 ? nextHistory.length - 1 - activeIndex : nextHistory.length - 1;
+            const paymentRecord: MembershipPaymentRecord = {
+                amount,
+                method,
+                date: today.toISOString(),
+                type: 'debt_payment'
+            };
+            nextHistory = nextHistory.map((period, index) => {
+                if (index !== historyIndex) return period;
+                const nextAmountPaid = Number(period.amountPaid || 0) + amount;
+                const nextDebt = Math.max(0, Number(period.debt || pendingDebt) - amount);
+                return {
+                    ...period,
+                    amountPaid: nextAmountPaid,
+                    debt: nextDebt,
+                    status: nextDebt > 0 ? period.status : 'closed',
+                    payments: [...(period.payments || []), paymentRecord]
+                };
+            });
+            const previousFutureDebt = Math.max(0, Number(selectedMember.futureDebt) || 0);
+            const futureDebtDate = selectedMember.futureDebtStartDate ? new Date(`${selectedMember.futureDebtStartDate}T00:00:00`) : null;
+            const todayStart = new Date(today);
+            todayStart.setHours(0, 0, 0, 0);
+            const isExpiredFutureDebt = !!futureDebtDate && futureDebtDate <= todayStart;
+            const nextFutureDebt = isExpiredFutureDebt ? Math.min(previousFutureDebt, newDebt) : previousFutureDebt;
+
+            const expirationStart = selectedMember.expirationDateObj ? new Date(selectedMember.expirationDateObj) : null;
+            expirationStart?.setHours(0, 0, 0, 0);
+            const currentStatus = expirationStart ? getMembershipStatus(expirationStart, selectedMember.status) : 'active';
 
             updateData = {
-                status: 'active',
+                status: currentStatus,
                 amountPaid: newTotalPaid,
                 debt: newDebt,
-                payments: arrayUnion({ amount, method, date: today.toISOString() }),
+                membershipHistory: nextHistory,
+                futureDebt: nextFutureDebt,
+                futureDebtStartDate: nextFutureDebt > 0 ? selectedMember.futureDebtStartDate || '' : '',
+                futureDebtPlan: nextFutureDebt > 0 ? selectedMember.futureDebtPlan || '' : '',
+                futureDebtPlanPrice: nextFutureDebt > 0 ? selectedMember.futureDebtPlanPrice || 0 : 0,
+                payments: arrayUnion({
+                    amount,
+                    method,
+                    date: today.toISOString(),
+                    type: 'debt_payment',
+                    concept: 'Pago de deuda'
+                }),
                 updatedAt: serverTimestamp()
             };
         }
 
         await updateDoc(memberRef, updateData);
 
-        await addDoc(collection(db, 'payments'), {
-            memberName: selectedMember.name,
-            memberId: selectedMember.id,
-            concept: renewalData?.plan || selectedMember.plan || 'Membresía',
-            amount,
-            method: methodMap[method] || method,
-            invoiceType: 'Boleta',
-            date: today,
-            createdAt: serverTimestamp()
-        });
+        if (amount > 0) {
+            await addDoc(collection(db, 'payments'), {
+                memberName: selectedMember.name,
+                memberId: selectedMember.id,
+                concept: renewalData?.plan || 'Pago de deuda',
+                amount,
+                method: methodMap[method] || method,
+                invoiceType: 'Boleta',
+                paymentType: renewalData ? 'renewal_payment' : 'debt_payment',
+                date: today,
+                createdAt: serverTimestamp()
+            });
+        }
 
         setShowCashPaymentModal(false);
         setSelectedMember(undefined);
@@ -1318,6 +1581,20 @@ export function MembersPage() {
             // Fix Date Timezone Issue for Join Date (createdAt)
             const [jy, jm, jd] = data.joinDateStr ? data.joinDateStr.split('-').map(Number) : [0, 0, 0];
             const joinDateObj = data.joinDateStr ? new Date(jy, jm - 1, jd) : new Date();
+            const membershipStartDateStr = data.membershipStartDateStr || data.joinDateStr || '';
+            const currentDebt = Math.max(0, Number(data.debt) || 0);
+            const currentMembershipPeriod: MembershipPeriod = {
+                id: `membership_${data.id || 'new'}_${membershipStartDateStr || Date.now()}`,
+                plan: data.plan,
+                startDate: membershipStartDateStr,
+                endDate: data.expirationDateStr || '',
+                planPrice: Number(data.planPrice) || 0,
+                amountPaid: Number(data.amountPaid) || 0,
+                debt: currentDebt,
+                status: data.status === 'active' ? 'active' : 'closed',
+                payments: [],
+                createdAt: new Date().toISOString()
+            };
 
             if (modalMode === 'create') {
                 await addDoc(collection(db, 'members'), {
@@ -1330,15 +1607,36 @@ export function MembersPage() {
                     amountPaid: data.amountPaid,
                     planPrice: data.planPrice,
                     debt: data.debt || 0,
-                    startDate: data.joinDateStr || '',
+                    startDate: membershipStartDateStr,
                     endDate: data.expirationDateStr || '',
                     expirationDate: expirationDateObj,
                     createdAt: joinDateObj,
+                    membershipHistory: [currentMembershipPeriod],
+                    adminNotes: data.adminNotes || '',
                     diet: data.diet || '',
                     ...(data.trainingProfile ? { trainingProfile: data.trainingProfile } : {})
                 });
             } else if (modalMode === 'edit' && data.id) {
-                await updateDoc(doc(db, 'members', data.id), {
+                const memberRef = doc(db, 'members', data.id);
+                const memberSnap = await getDoc(memberRef);
+                const existingHistory = normalizeMembershipHistory(memberSnap.exists() ? memberSnap.data().membershipHistory : []);
+                const matchingIndex = existingHistory.findIndex((period) => period.startDate === membershipStartDateStr && period.endDate === data.expirationDateStr);
+                const nextHistory = existingHistory.length === 0
+                    ? [currentMembershipPeriod]
+                    : existingHistory.map((period, index) => {
+                        if (index !== (matchingIndex >= 0 ? matchingIndex : existingHistory.length - 1)) return period;
+                        return {
+                            ...period,
+                            plan: data.plan,
+                            startDate: membershipStartDateStr,
+                            endDate: data.expirationDateStr || '',
+                            planPrice: Number(data.planPrice) || 0,
+                            amountPaid: Number(data.amountPaid) || 0,
+                            debt: currentDebt,
+                            status: data.status === 'active' ? 'active' : period.status
+                        };
+                    });
+                await updateDoc(memberRef, {
                     name: data.name,
                     dni: data.dni || '',
                     email: data.email,
@@ -1349,10 +1647,12 @@ export function MembersPage() {
                     planPrice: data.planPrice,
                     debt: data.debt || 0,
                     expirationDate: expirationDateObj,
-                    startDate: data.joinDateStr,
+                    startDate: membershipStartDateStr,
                     endDate: data.expirationDateStr,
                     createdAt: joinDateObj,
+                    membershipHistory: nextHistory,
                     updatedAt: serverTimestamp(),
+                    adminNotes: data.adminNotes || '',
                     diet: data.diet || '',
                     ...(data.trainingProfile ? { trainingProfile: data.trainingProfile } : {})
                 });
@@ -1379,9 +1679,8 @@ export function MembersPage() {
     // Counts
     const totalMembers = members.length;
     const activeMembers = members.filter(m => m.status === 'active').length;
-    const pendingMembers = members.filter(m => m.status === 'pending').length;
     const overdueMembers = members.filter(m => m.status === 'overdue').length;
-    const prospectMembers = members.filter(m => m.status === 'prospect').length;
+    const inactiveMembers = members.filter(m => m.status === 'inactive').length;
 
     if (loading) {
         return <div className="flex justify-center items-center h-64"><Loader2 className="w-8 h-8 animate-spin text-green-500" /></div>;
@@ -1423,9 +1722,8 @@ export function MembersPage() {
                     {[
                         { id: 'all', label: 'Todos', color: 'bg-green-500 text-black', inactive: 'bg-neutral-800 text-gray-400 hover:text-white' },
                         { id: 'active', label: 'Activo', color: 'bg-green-500/20 text-green-500 border border-green-500/50', inactive: 'bg-neutral-800 text-gray-400 hover:text-white' },
-                        { id: 'pending', label: 'Pendiente', color: 'bg-yellow-500/20 text-yellow-500 border border-yellow-500/50', inactive: 'bg-neutral-800 text-gray-400 hover:text-white' },
-                        { id: 'prospect', label: 'Prospectos', color: 'bg-purple-500/20 text-purple-500 border border-purple-500/50', inactive: 'bg-neutral-800 text-gray-400 hover:text-white' },
                         { id: 'overdue', label: 'Vencido', color: 'bg-red-500/20 text-red-500 border border-red-500/50', inactive: 'bg-neutral-800 text-gray-400 hover:text-white' },
+                        { id: 'inactive', label: 'Inactivo', color: 'bg-neutral-700 text-gray-200 border border-neutral-600', inactive: 'bg-neutral-800 text-gray-400 hover:text-white' },
                     ].map((filter) => (
                         <button
                             key={filter.id}
@@ -1451,7 +1749,7 @@ export function MembersPage() {
                                     <th className="px-6 py-4 font-medium">Nombre</th>
                                     <th className="px-6 py-4 font-medium">Contacto</th>
                                     <th className="px-6 py-4 font-medium">Plan</th>
-                                    <th className="px-6 py-4 font-medium">Ingreso</th>
+                                    <th className="px-6 py-4 font-medium">Inicio de membresía</th>
                                     <th className="px-6 py-4 font-medium">Vencimiento</th>
                                     <th className="px-6 py-4 font-medium">Estado</th>
                                     <th className="px-6 py-4 font-medium text-right"></th>
@@ -1489,7 +1787,7 @@ export function MembersPage() {
                                             {member.plan}
                                         </td>
                                         <td className="px-6 py-4 text-gray-300">
-                                            {member.joinDate}
+                                            {member.membershipStartDate || member.joinDate}
                                         </td>
                                         <td className="px-6 py-4 text-gray-300">
                                             {member.expirationDate}
@@ -1498,22 +1796,28 @@ export function MembersPage() {
                                             <span className={cn(
                                                 "px-3 py-1 rounded-full text-xs font-medium border",
                                                 member.status === 'active' ? "bg-green-500/10 text-green-500 border-green-500/20" :
-                                                    member.status === 'pending' ? "bg-yellow-500/10 text-yellow-500 border-yellow-500/20" :
-                                                        member.status === 'prospect' ? "bg-purple-500/10 text-purple-500 border-purple-500/20" :
-                                                            "bg-red-500/10 text-red-500 border-red-500/20"
+                                                    member.status === 'overdue' ? "bg-red-500/10 text-red-500 border-red-500/20" :
+                                                        "bg-neutral-700/40 text-gray-300 border-neutral-600"
                                             )}>
                                                 {member.status === 'active' ? 'Activo' :
-                                                    member.status === 'pending' ? 'Pendiente' :
-                                                        member.status === 'prospect' ? 'Prospecto' : 'Vencido'}
+                                                    member.status === 'overdue' ? 'Vencido' : 'Inactivo'}
                                             </span>
                                             {(() => {
                                                 const debt = Number(member.debt ?? Math.max(0, Number(member.planPrice || 0) - Number(member.amountPaid || 0)));
-                                                const futureDebt = Number(member.futureDebt || 0);
-                                                return debt > 0 || futureDebt > 0 ? (
+                                                const rawFutureDebt = Number(member.futureDebt || 0);
+                                                const futureDebtDate = member.futureDebtStartDate ? new Date(`${member.futureDebtStartDate}T00:00:00`) : null;
+                                                const todayStart = new Date();
+                                                todayStart.setHours(0, 0, 0, 0);
+                                                const isFutureDebtActuallyFuture = !!futureDebtDate && futureDebtDate > todayStart;
+                                                const futureDebt = isFutureDebtActuallyFuture ? rawFutureDebt : 0;
+                                                const unpaidFromPlan = Math.max(0, Number(member.planPrice || 0) - Number(member.amountPaid || 0));
+                                                const expiredFutureDebt = rawFutureDebt > 0 && !isFutureDebtActuallyFuture && unpaidFromPlan > 0 ? rawFutureDebt : 0;
+                                                const currentDebt = debt > 0 ? debt : expiredFutureDebt;
+                                                return currentDebt > 0 || futureDebt > 0 ? (
                                                     <div className="mt-1 space-y-1">
-                                                        {debt > 0 && (
+                                                        {currentDebt > 0 && (
                                                         <span className="text-[10px] bg-red-500 text-white px-2 py-0.5 rounded-full font-bold">
-                                                            Debe: S/ {debt.toFixed(2)}
+                                                            Debe: S/ {currentDebt.toFixed(2)}
                                                         </span>
                                                         )}
                                                         {futureDebt > 0 && (
@@ -1529,6 +1833,7 @@ export function MembersPage() {
                                             <MemberActionsMenu
                                                 member={member}
                                                 onAction={handleAction}
+                                                isDeleting={deletingMemberId === member.id}
                                             />
                                         </td>
                                     </tr>
@@ -1556,8 +1861,8 @@ export function MembersPage() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <StatsCard title="Total Miembros" value={totalMembers} color="text-white" />
                 <StatsCard title="Activos" value={activeMembers} color="text-green-500" />
-                <StatsCard title="Prospectos" value={prospectMembers} color="text-purple-500" />
-                <StatsCard title="Vencidos" value={pendingMembers + overdueMembers} color="text-red-500" />
+                <StatsCard title="Vencidos" value={overdueMembers} color="text-red-500" />
+                <StatsCard title="Inactivos" value={inactiveMembers} color="text-gray-400" />
             </div>
 
             {/* Create / Edit Member Modal */}

@@ -3,10 +3,11 @@ import { useState, useEffect } from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Download, Plus, DollarSign, TrendingUp, TrendingDown, Calendar, Search, MoreVertical, CreditCard, FileText, Banknote, Landmark } from 'lucide-react';
+import { Download, Plus, DollarSign, TrendingUp, TrendingDown, Calendar, Search, MoreVertical, CreditCard, FileText, Banknote, Landmark, Receipt, Send } from 'lucide-react';
 import { BarChart, Bar, XAxis, Tooltip, ResponsiveContainer, Cell, LabelList } from 'recharts';
 import { collection, query, orderBy, onSnapshot, doc, getDoc, updateDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { httpsCallable } from 'firebase/functions';
+import { db, functions } from '@/lib/firebase';
 import { NewInvoiceDialog } from '@/components/dashboard/NewInvoiceDialog';
 
 interface Transaction {
@@ -20,6 +21,10 @@ interface Transaction {
     method: string;
     status: 'Pagado' | 'Pendiente' | 'Reembolsado';
     type?: 'Boleta' | 'Factura';
+    memberId?: string;
+    phone?: string;
+    orderId?: string;
+    createdFrom?: 'member' | 'payment';
 }
 
 function toDate(value: any): Date {
@@ -44,6 +49,30 @@ function isSameRecordedPayment(memberPayment: any, paymentDoc: any): boolean {
     return timeDiffMs <= 5 * 60 * 1000;
 }
 
+function formatVoucherText(tx: Transaction): string {
+    const lines = [
+        '---------------------',
+        'MEGAGYM',
+        'COMPROBANTE DE PAGO',
+        '---------------------',
+        `Cliente: ${tx.user}`,
+        `Comprobante: ${tx.invoice}`,
+        `Fecha: ${tx.date}`,
+        `Concepto: ${tx.plan}`,
+        `Metodo: ${tx.method}`,
+        `Monto pagado: S/ ${tx.amount.toFixed(2)}`,
+    ];
+
+    if (tx.orderId) {
+        lines.push(`Orden: ${tx.orderId}`);
+    }
+
+    lines.push('---------------------');
+    lines.push('Gracias por entrenar con nosotros.');
+
+    return lines.join('\n');
+}
+
 export function PaymentsPage() {
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState('Todos');
@@ -63,6 +92,30 @@ export function PaymentsPage() {
 
     const [isNewInvoiceOpen, setIsNewInvoiceOpen] = useState(false);
     const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+    const [voucherTx, setVoucherTx] = useState<Transaction | null>(null);
+    const [sendingVoucher, setSendingVoucher] = useState(false);
+
+    const handleSendVoucher = async () => {
+        if (!voucherTx?.phone) {
+            alert('Este pago no tiene telefono registrado para reenviar por WhatsApp.');
+            return;
+        }
+
+        try {
+            setSendingVoucher(true);
+            const sendManualWhatsAppMessage = httpsCallable(functions, 'sendManualWhatsAppMessage');
+            await sendManualWhatsAppMessage({
+                phone: voucherTx.phone,
+                content: formatVoucherText(voucherTx)
+            });
+            alert('Voucher reenviado por WhatsApp.');
+        } catch (error) {
+            console.error('Error enviando voucher:', error);
+            alert('No se pudo reenviar el voucher. Revisa la conexion o intenta nuevamente.');
+        } finally {
+            setSendingVoucher(false);
+        }
+    };
 
     const handleDeletePayment = async (txId: string) => {
         if (!confirm('¿Eliminar este pago? Esta acción no se puede deshacer.')) return;
@@ -140,6 +193,7 @@ export function PaymentsPage() {
                         if (isDuplicatedInPaymentsCollection) return;
 
                         const amount = Number(pago.amount) || 0;
+                        if (amount <= 0) return;
                         let dateObj = new Date();
                         if (pago.date) dateObj = new Date(pago.date);
 
@@ -162,7 +216,11 @@ export function PaymentsPage() {
                             rawDate: dateObj,
                             method: pago.method || 'Efectivo',
                             status: 'Pagado',
-                            type: 'Boleta'
+                            type: 'Boleta',
+                            memberId: data.id,
+                            phone: data.phone || '',
+                            orderId: pago.orderId || pago.chargeId || '',
+                            createdFrom: 'member'
                         });
                     });
                 } else {
@@ -194,7 +252,10 @@ export function PaymentsPage() {
                         rawDate: dateObj,
                         method: 'Efectivo',
                         status: debt > 0 ? 'Pendiente' : 'Pagado',
-                        type: 'Boleta'
+                        type: 'Boleta',
+                        memberId: data.id,
+                        phone: data.phone || '',
+                        createdFrom: 'member'
                     });
                 }
             });
@@ -203,7 +264,9 @@ export function PaymentsPage() {
             paymentsData.forEach((doc) => {
                 const data = doc.data;
                 const amount = Number(data.amount) || 0;
+                if (amount <= 0) return;
                 const dateObj = data.date?.toDate ? data.date.toDate() : (new Date(data.date || new Date()));
+                const linkedMember = data.memberId ? membersData.find((member) => member.id === data.memberId) : null;
 
                 total += amount;
                 // Manual payments are usually "paid" immediately, no debt tracking here yet.
@@ -226,7 +289,11 @@ export function PaymentsPage() {
                     rawDate: dateObj,
                     method: data.method || 'Efectivo',
                     status: 'Pagado',
-                    type: data.invoiceType || 'Boleta'
+                    type: data.invoiceType || 'Boleta',
+                    memberId: data.memberId || linkedMember?.id,
+                    phone: data.phone || linkedMember?.phone || '',
+                    orderId: data.orderId || data.chargeId || '',
+                    createdFrom: 'payment'
                 });
             });
 
@@ -493,9 +560,19 @@ export function PaymentsPage() {
                                                     <MoreVertical className="h-4 w-4" />
                                                 </Button>
                                                 {openMenuId === tx.id && (
-                                                    <div className="absolute right-0 mt-1 w-36 bg-neutral-800 border border-neutral-700 rounded-md shadow-lg z-10">
+                                                    <div className="absolute right-0 mt-1 w-56 bg-neutral-800 border border-neutral-700 rounded-md shadow-lg z-10">
                                                         <button
-                                                            className="w-full text-left px-4 py-2 text-sm text-red-400 hover:bg-neutral-700 rounded-md"
+                                                            className="w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-neutral-700 rounded-t-md flex items-center gap-2"
+                                                            onClick={() => {
+                                                                setVoucherTx(tx);
+                                                                setOpenMenuId(null);
+                                                            }}
+                                                        >
+                                                            <Receipt className="h-4 w-4 text-green-400" />
+                                                            Ver / reenviar voucher
+                                                        </button>
+                                                        <button
+                                                            className="w-full text-left px-4 py-2 text-sm text-red-400 hover:bg-neutral-700 rounded-b-md"
                                                             onClick={() => handleDeletePayment(tx.id)}
                                                         >
                                                             Eliminar
@@ -518,6 +595,44 @@ export function PaymentsPage() {
                         // Real-time listener handles update
                     }}
                 />
+            )}
+            {voucherTx && (
+                <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+                    <div className="bg-neutral-900 border border-neutral-800 rounded-lg w-full max-w-md">
+                        <div className="p-5 border-b border-neutral-800 flex items-center justify-between">
+                            <div>
+                                <h2 className="text-lg font-bold text-white">Voucher de pago</h2>
+                                <p className="text-sm text-gray-400">{voucherTx.user}</p>
+                            </div>
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-gray-400 hover:text-white"
+                                onClick={() => setVoucherTx(null)}
+                            >
+                                Cerrar
+                            </Button>
+                        </div>
+                        <div className="p-5 space-y-4">
+                            <pre className="whitespace-pre-wrap rounded-md border border-neutral-700 bg-neutral-950 p-4 text-sm text-gray-200 font-sans">
+                                {formatVoucherText(voucherTx)}
+                            </pre>
+                            {!voucherTx.phone && (
+                                <p className="text-sm text-yellow-400">
+                                    Este pago no tiene telefono registrado. Puedes verlo, pero no reenviarlo por WhatsApp.
+                                </p>
+                            )}
+                            <Button
+                                className="w-full bg-green-600 hover:bg-green-700 text-white"
+                                disabled={sendingVoucher || !voucherTx.phone}
+                                onClick={handleSendVoucher}
+                            >
+                                <Send className="h-4 w-4 mr-2" />
+                                {sendingVoucher ? 'Enviando...' : 'Reenviar por WhatsApp'}
+                            </Button>
+                        </div>
+                    </div>
+                </div>
             )}
         </div>
     )

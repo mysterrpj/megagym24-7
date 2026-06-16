@@ -4,6 +4,10 @@
 
 Ahora cuando un cliente paga por WhatsApp, **automáticamente recibe un comprobante de pago** con todos los detalles.
 
+Desde el dashboard tambien se puede abrir un pago en `Pagos y Facturacion` y usar **Ver / reenviar voucher** para revisar el comprobante y reenviarlo por WhatsApp si el cliente tiene telefono registrado.
+
+Regla importante: una renovacion registrada con monto `S/ 0` no genera voucher de pago. Si el cliente pide voucher por WhatsApp sin haber pagado, Sofia debe responder que todavia no hay pago registrado.
+
 ---
 
 ## 🎨 CÓMO SE VE EL COMPROBANTE
@@ -200,6 +204,13 @@ Para cambiar el diseño del comprobante, edita la función `generateAndSendVouch
 - Revisa tu WhatsApp
 - Deberías recibir la imagen del comprobante
 
+### 2.1 Reenviar desde el dashboard
+- Ir a `Pagos y Facturacion`
+- Abrir los tres puntos de un pago
+- Seleccionar `Ver / reenviar voucher`
+- Revisar el texto del comprobante
+- Presionar `Reenviar por WhatsApp`
+
 ### 3. Verificar en Firebase Storage
 ```
 Firebase Console → Storage → comprobantes/
@@ -276,7 +287,8 @@ Luego modificar el código para usar sharp.
 - [ ] Agregar QR code para validar entrada al gym
 - [ ] Enviar también por email (PDF)
 - [ ] Incluir logo del gimnasio
-- [ ] Mostrar historial de pagos en el comprobante
+- [x] Reenviar voucher desde el panel de pagos
+- [ ] Mostrar historial de pagos completo en el comprobante
 - [ ] Agregar firma digital
 
 ---
