@@ -78,11 +78,20 @@ const parseLocalDateInput = (value?: string) => {
     return isNaN(date.getTime()) ? null : date;
 };
 
-const getPlanOption = (planName: string) => PLAN_OPTIONS.find(plan => plan.name === planName);
+const normalizePlanName = (planName?: string) => {
+    const normalized = String(planName || '').trim().toLowerCase();
+    if (normalized.includes('interdiario')) return 'Plan Interdiario';
+    if (normalized.includes('trimestral') || normalized.includes('3 meses') || normalized.includes('3 mes')) return 'Plan Trimestral';
+    if (normalized.includes('bimestral') || normalized.includes('2 meses') || normalized.includes('2 mes')) return 'Plan Bimestral';
+    if (normalized.includes('mensual') || normalized.includes('1 mes')) return 'Plan Mensual';
+    return 'Plan Mensual';
+};
+
+const getPlanOption = (planName: string) => PLAN_OPTIONS.find(plan => plan.name === normalizePlanName(planName));
 
 const getPlanPrice = (planName: string, fallback = 70) => getPlanOption(planName)?.price ?? fallback;
 
-const getPlanDays = (planName: string) => getPlanOption(planName)?.days ?? 365;
+const getPlanDays = (planName: string) => getPlanOption(planName)?.days ?? 30;
 
 const normalizeMembershipHistory = (history: any): MembershipPeriod[] => {
     return Array.isArray(history) ? history.map((item) => ({
@@ -170,7 +179,7 @@ function MemberModal({
     const [dni, setDni] = useState(member?.dni || '');
     const [email, setEmail] = useState(member?.email || '');
     const [phone, setPhone] = useState(member?.phone || '');
-    const [plan, setPlan] = useState(member?.plan || 'Plan Mensual');
+    const [plan, setPlan] = useState(normalizePlanName(member?.plan));
     const [status, setStatus] = useState<Member['status']>(member?.status || 'active');
 
     // Training profile
@@ -625,8 +634,8 @@ function PaymentModal({
     member: Member;
     onClose: () => void;
 }) {
-    const [selectedPlan, setSelectedPlan] = useState(getPlanOption(member.plan) ? member.plan : 'Plan Mensual');
-    const [amount, setAmount] = useState(getPlanPrice(getPlanOption(member.plan) ? member.plan : 'Plan Mensual', member.planPrice || 70).toString());
+    const [selectedPlan, setSelectedPlan] = useState(normalizePlanName(member.plan));
+    const [amount, setAmount] = useState(getPlanPrice(normalizePlanName(member.plan), member.planPrice || 70).toString());
     const [loading, setLoading] = useState(false);
 
     useEffect(() => {
