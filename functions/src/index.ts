@@ -45,6 +45,53 @@ function addDaysToLimaDate(dateString: string, days: number) {
     return getLimaDateString(date);
 }
 
+function getMembershipPlanDetails(planName: string, paidAmount: number) {
+    const normalized = String(planName || '').toLowerCase();
+    if (normalized.includes('interdiario')) return { name: 'Plan Interdiario', price: 50, days: 30 };
+    if (normalized.includes('trimestral') || normalized.includes('3') || normalized.includes('tres')) {
+        return { name: 'Plan Trimestral', price: 150, days: 90 };
+    }
+    if (normalized.includes('bimestral') || normalized.includes('2') || normalized.includes('dos')) {
+        return { name: 'Plan Bimestral', price: 120, days: 60 };
+    }
+    return { name: 'Plan Mensual', price: paidAmount > 0 ? paidAmount : 70, days: 30 };
+}
+
+function buildMembershipRenewalData(
+    adminInner: any,
+    memberId: string,
+    memberData: any,
+    planName: string,
+    paidAmount: number
+) {
+    const plan = getMembershipPlanDetails(planName, paidAmount);
+    const today = getLimaDateString();
+    const currentEnd = String(memberData.endDate || '');
+    const startDate = currentEnd >= today ? addDaysToLimaDate(currentEnd, 1) : today;
+    const endDate = addDaysToLimaDate(startDate, plan.days - 1);
+    const nowIso = new Date().toISOString();
+    const debt = Math.max(0, plan.price - paidAmount);
+    const history = Array.isArray(memberData.membershipHistory)
+        ? memberData.membershipHistory.map((period: any) =>
+            period?.status === 'active' ? { ...period, status: 'closed' } : period
+        )
+        : [];
+    history.push({
+        id: `membership_${memberId}_${startDate}_${Date.now()}`,
+        plan: plan.name, startDate, endDate, planPrice: plan.price,
+        amountPaid: paidAmount, debt,
+        status: startDate > today ? 'future' : 'active',
+        payments: [{ amount: paidAmount, method: 'Culqi', date: nowIso, type: 'renewal_payment' }],
+        createdAt: nowIso
+    });
+    return {
+        status: 'active', plan: plan.name, startDate, endDate,
+        expirationDate: adminInner.firestore.Timestamp.fromDate(parseLimaDate(endDate)),
+        amountPaid: paidAmount, planPrice: plan.price, debt,
+        membershipHistory: history, paymentApprovedAt: nowIso
+    };
+}
+
 function diffLimaDays(fromDateString: string, toDateString: string) {
     const from = parseLimaDate(fromDateString);
     const to = parseLimaDate(toDateString);
@@ -312,25 +359,20 @@ export const culqiWebhook = functions
                         const memberDoc = await findMemberByPhone(db, phone);
                         if (memberDoc) {
                             const memberRef = memberDoc.ref;
-                            const today = new Date();
-                            const endDate = new Date();
-                            endDate.setMonth(today.getMonth() + 1);
+                            const memberData = memberDoc.data();
+                            const paidAmount = order.amount / 100;
+                            const renewal = buildMembershipRenewalData(adminInner, memberDoc.id, memberData, planName, paidAmount);
+                            const endDate = parseLimaDate(renewal.endDate);
 
                             await memberRef.update({
-                                status: 'active',
-                                plan: planName || 'Plan 1 Mes',
-                                startDate: today.toISOString().split('T')[0],
-                                endDate: endDate.toISOString().split('T')[0],
+                                ...renewal,
                                 culqiOrderId: order.id,
-                                paymentApprovedAt: new Date().toISOString(),
                                 payments: adminInner.firestore.FieldValue.arrayUnion({
-                                    amount: order.amount / 100,
-                                    date: new Date().toISOString(),
-                                    orderId: order.id
+                                    amount: paidAmount, method: 'Culqi', date: new Date().toISOString(),
+                                    orderId: order.id, type: 'renewal_payment'
                                 })
                             });
 
-                            const memberData = memberDoc.data();
                             const voucher = [
                                 `━━━━━━━━━━━━━━━━━━━━━`,
                                 `🏋️ *MEGAGYM* 🏋️`,
@@ -445,29 +487,16 @@ export const createCulqiCharge = functions
                     } else {
                         const memberDoc = await findMemberByPhone(db, phone);
                         if (memberDoc) {
-                            const today = new Date();
                             const memberData = memberDoc.data();
-                            const currentEnd = memberData.endDate ? new Date(memberData.endDate) : today;
-                            const baseDate = currentEnd > today ? currentEnd : today;
-                            const endDate = new Date(baseDate);
-                            endDate.setMonth(endDate.getMonth() + 1);
-                            const prevPaid = Number(memberData.amountPaid) || 0;
+                            const paidAmount = amount / 100;
+                            const renewal = buildMembershipRenewalData(adminInner, memberDoc.id, memberData, planName, paidAmount);
 
                             await memberDoc.ref.update({
-                                status: 'active',
-                                plan: planName || 'Plan 1 Mes',
-                                startDate: baseDate.toISOString().split('T')[0],
-                                endDate: endDate.toISOString().split('T')[0],
-                                expirationDate: adminInner.firestore.Timestamp.fromDate(endDate),
-                                amountPaid: prevPaid + (amount / 100),
-                                planPrice: amount / 100,
+                                ...renewal,
                                 culqiChargeId: charge.id,
-                                paymentApprovedAt: new Date().toISOString(),
                                 payments: adminInner.firestore.FieldValue.arrayUnion({
-                                    amount: amount / 100,
-                                    method: 'Culqi',
-                                    date: new Date().toISOString(),
-                                    chargeId: charge.id
+                                    amount: paidAmount, method: 'Culqi', date: new Date().toISOString(),
+                                    chargeId: charge.id, orderId: orderId || '', type: 'renewal_payment'
                                 })
                             });
                             console.log(`Member updated: ${memberDoc.id}`);
@@ -803,4 +832,150 @@ export const serveVoucher = functions
         res.setHeader('Content-Type', 'image/jpeg');
         res.setHeader('Cache-Control', 'public, max-age=3600');
         file.createReadStream().pipe(res);
+    });
+
+// Valida el token de identidad del link de voz y devuelve SOLO los datos mínimos para
+// personalizar a la Sofía de voz (agoravoz). No expone DNI, notas internas ni historial.
+// El token lo firma la tool generar_link_voz con VOICE_LINK_SECRET; aquí se verifica.
+export const getVoiceContext = functions
+    .runWith({ memory: '256MB', timeoutSeconds: 30 })
+    .https.onRequest(async (req, res) => {
+        // CORS restringido al dominio de la página de voz (+ localhost para desarrollo).
+        const configuredOrigin = (process.env.VOICE_PAGE_URL || '').replace(/\/+$/, '');
+        const allowedOrigins = new Set([
+            configuredOrigin,
+            'http://localhost:3000',
+            'http://127.0.0.1:3000'
+        ].filter(Boolean));
+        const requestOrigin = String(req.headers.origin || '');
+        if (allowedOrigins.has(requestOrigin)) {
+            res.setHeader('Access-Control-Allow-Origin', requestOrigin);
+        }
+        res.setHeader('Vary', 'Origin');
+        res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+        if (req.method === 'OPTIONS') {
+            res.status(204).send('');
+            return;
+        }
+        if (req.method !== 'POST') {
+            res.status(405).json({ error: 'method_not_allowed' });
+            return;
+        }
+
+        try {
+            const secret = process.env.VOICE_LINK_SECRET;
+            if (!secret) {
+                console.error('❌ getVoiceContext: VOICE_LINK_SECRET no está configurado.');
+                res.status(500).json({ error: 'not_configured' });
+                return;
+            }
+
+            const token = String(req.body?.token || '').trim();
+            if (!token) {
+                res.status(400).json({ error: 'missing_token' });
+                return;
+            }
+
+            const { verifyVoiceToken } = require('./tools/voiceLink');
+            const result = verifyVoiceToken(token, secret);
+            if (!result.valid) {
+                // Firma inválida o token vencido → 401 (el frontend muestra "pide uno nuevo").
+                res.status(401).json({ error: 'invalid_token', reason: result.reason });
+                return;
+            }
+
+            const phone = String(result.payload?.phone || '').trim();
+            if (!phone) {
+                res.status(401).json({ error: 'invalid_token', reason: 'no_phone' });
+                return;
+            }
+
+            const adminInner = require('firebase-admin');
+            if (!adminInner.apps.length) adminInner.initializeApp();
+            const db = adminInner.firestore();
+
+            const memberDoc = await findMemberByPhone(db, phone);
+            if (!memberDoc) {
+                res.status(404).json({ error: 'member_not_found' });
+                return;
+            }
+            const member = memberDoc.data() || {};
+
+            // Defensa en profundidad: re-verifica que siga elegible (misma política que la tool).
+            let daysUntilExpiry: number | null = null;
+            let daysOverdue: number | null = null;
+            if (member.endDate) {
+                const end = new Date(member.endDate);
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                daysUntilExpiry = Math.ceil((end.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+                if (daysUntilExpiry < 0) daysOverdue = Math.abs(daysUntilExpiry);
+            }
+            const eligible = member.status !== 'inactive'
+                && (daysOverdue === null || daysOverdue < 15);
+            if (!eligible) {
+                res.status(403).json({ error: 'not_eligible' });
+                return;
+            }
+
+            // Token de un solo uso (opcional, activable con VOICE_TOKEN_SINGLE_USE=true):
+            // registra el jti en Firestore para invalidar reusos del mismo enlace.
+            // El token ya es corto (15 min); esto es una capa extra. Se hace en transacción
+            // para que dos peticiones simultáneas no puedan consumir el mismo jti.
+            if (String(process.env.VOICE_TOKEN_SINGLE_USE || '').toLowerCase() === 'true') {
+                const jti = String(result.payload?.jti || '');
+                if (!jti) {
+                    res.status(401).json({ error: 'invalid_token', reason: 'no_jti' });
+                    return;
+                }
+                const tokenRef = db.collection('usedVoiceTokens').doc(jti);
+                const firstUse = await db.runTransaction(async (tx: any) => {
+                    const doc = await tx.get(tokenRef);
+                    if (doc.exists) return false;
+                    tx.set(tokenRef, {
+                        usedAt: adminInner.firestore.FieldValue.serverTimestamp(),
+                        // expireAt permite una política TTL de Firestore que limpie estos docs.
+                        expireAt: typeof result.payload?.exp === 'number'
+                            ? adminInner.firestore.Timestamp.fromMillis(result.payload.exp * 1000)
+                            : null,
+                    });
+                    return true;
+                });
+                if (!firstUse) {
+                    res.status(401).json({ error: 'invalid_token', reason: 'reused' });
+                    return;
+                }
+            }
+
+            // Rutina: misma fuente que la tool get_student_routine (studentRoutineAssignments).
+            let rutinaResumen: string | null = null;
+            let routineUrl: string | null = null;
+            try {
+                const bot = require('./bot/messageProcessor');
+                const routineRes = await bot.executeTool('get_student_routine', { phone });
+                if (routineRes?.found && Array.isArray(routineRes.routines) && routineRes.routines.length > 0) {
+                    rutinaResumen = routineRes.routines[0].title || null;
+                    routineUrl = routineRes.routines[0].url || null;
+                }
+            } catch (e: any) {
+                console.error('getVoiceContext: error obteniendo rutina', e?.message);
+            }
+
+            const profile = member.trainingProfile || {};
+            // Payload mínimo y seguro: solo lo necesario para personalizar la voz.
+            res.status(200).json({
+                name: (member.name || '').split(' ')[0] || null,
+                status: member.status || null,
+                diasParaVencer: daysUntilExpiry,
+                plan: member.plan || null,
+                objetivo: profile.objetivo || null,
+                rutinaResumen,
+                routineUrl
+            });
+        } catch (e: any) {
+            console.error('❌ Error en getVoiceContext:', e);
+            res.status(500).json({ error: e.message });
+        }
     });

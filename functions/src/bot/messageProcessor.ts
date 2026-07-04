@@ -682,8 +682,9 @@ export async function executeTool(name: string, args: any) {
                 let bookingDate = args.bookingDate || '';
                 let classId = String(args.classId || '').trim();
                 let amount = Number(args.amount) || 0;
+                let resolvedPaymentType = args.paymentType || 'membership';
 
-                if (args.paymentType === 'class_booking') {
+                if (resolvedPaymentType === 'class_booking') {
                     const resolvedClass = await resolveClassBookingTarget(dbInner, {
                         classId,
                         planName,
@@ -705,21 +706,25 @@ export async function executeTool(name: string, args: any) {
                 let customerName = args.customerName;
                 let dni = args.dni;
                 let email = args.email;
+                const memSnap = await findMember(dbInner, args.phone);
+                if (memSnap && !memSnap.empty) {
+                    const memData = memSnap.docs[0].data();
+                    const pendingDebt = Math.max(0, Number(memData.debt) || 0);
+                    customerName = customerName || memData.name || 'Usuario';
+                    dni = dni || memData.dni || '';
+                    email = email || memData.email || 'cliente@megagym.pe';
 
-                if (!customerName || !dni || !email) {
-                    const memSnap = await findMember(dbInner, args.phone);
-                    if (memSnap && !memSnap.empty) {
-                        const memData = memSnap.docs[0].data();
-                        customerName = customerName || memData.name || 'Usuario';
-                        dni = dni || memData.dni || '';
-                        email = email || memData.email || 'cliente@megagym.pe';
-                        if (args.paymentType === 'debt_payment') {
-                            amount = Math.max(0, Number(memData.debt) || 0);
-                        }
+                    // Settle the current membership before creating another period.
+                    if (resolvedPaymentType === 'membership' && pendingDebt > 0) {
+                        resolvedPaymentType = 'debt_payment';
+                        planName = 'Pago de deuda';
+                        amount = pendingDebt;
+                    } else if (resolvedPaymentType === 'debt_payment') {
+                        amount = pendingDebt;
                     }
                 }
 
-                if (args.paymentType === 'debt_payment' && amount <= 0) {
+                if (resolvedPaymentType === 'debt_payment' && amount <= 0) {
                     return { error: 'El cliente no tiene deuda pendiente para pagar.' };
                 }
 
@@ -729,7 +734,7 @@ export async function executeTool(name: string, args: any) {
                     body: JSON.stringify({
                         phone: args.phone,
                         planName,
-                        paymentType: args.paymentType || 'membership',
+                        paymentType: resolvedPaymentType,
                         amount,
                         classId,
                         bookingDate,
@@ -740,7 +745,7 @@ export async function executeTool(name: string, args: any) {
                 });
                 const data = await response.json();
                 if (!response.ok) throw new Error(data.error || "Error connecting to payment service");
-                return { url: data.url, message: "Link de pago generado." };
+                return { url: data.url, paymentType: resolvedPaymentType, message: "Link de pago generado." };
             } catch (error: any) {
                 return { error: error.message };
             }
@@ -964,6 +969,54 @@ export async function executeTool(name: string, args: any) {
                 return { error: e.message };
             }
 
+        case 'generar_link_voz':
+            try {
+                const { signVoiceToken } = require('../tools/voiceLink');
+                const secret = process.env.VOICE_LINK_SECRET;
+                if (!secret) {
+                    console.error('❌ generar_link_voz: VOICE_LINK_SECRET no está configurado.');
+                    return { eligible: false, reason: 'not_configured', message: 'La asesoría por voz aún no está disponible.' };
+                }
+
+                const memSnap = await findMember(dbInner, args.phone);
+                if (!memSnap || memSnap.empty) {
+                    return { eligible: false, reason: 'no_member', message: 'No encontré tu membresía con este número.' };
+                }
+                const memberData = memSnap.docs[0].data();
+
+                // Reutiliza la misma lógica de estado del bot: vencido >= 15 días o inactivo
+                // bloquea el acceso personalizado (misma frontera que las rutinas/dieta).
+                let daysOverdueLocal: number | null = null;
+                if (memberData.endDate) {
+                    const end = new Date(memberData.endDate);
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    const diff = Math.ceil((end.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+                    if (diff < 0) daysOverdueLocal = Math.abs(diff);
+                }
+                const eligible = memberData.status !== 'inactive'
+                    && (daysOverdueLocal === null || daysOverdueLocal < 15);
+                if (!eligible) {
+                    return {
+                        eligible: false,
+                        reason: 'inactive_or_overdue',
+                        message: 'Tu membresía no está activa ahora. Te ayudo a renovar y en cuanto se active podrás usar la asesoría por voz.'
+                    };
+                }
+
+                // El teléfono guardado en members (formato +51XXXXXXXXX) es la fuente de verdad
+                // para que getVoiceContext lo vuelva a encontrar en la Fase 2.
+                const normalizedPhone = memberData.phone || String(args.phone || '').replace(/^whatsapp:/, '').replace(/\s/g, '');
+                const token = signVoiceToken({ phone: normalizedPhone }, secret, 15 * 60);
+                const base = (process.env.VOICE_PAGE_URL || 'https://REEMPLAZAR-DOMINIO-VOZ').replace(/\/+$/, '');
+                const link = `${base}/?token=${token}`;
+
+                return { eligible: true, link, expiresInMinutes: 15 };
+            } catch (e: any) {
+                console.error('❌ Error en generar_link_voz:', e);
+                return { error: e.message };
+            }
+
         default:
             return { error: "Tool not found" };
     }
@@ -1154,6 +1207,20 @@ export async function processMessage(db: any, phone: string, messageText: string
             function: {
                 name: "check_member_status",
                 description: "Consultar el estado de la membresía del cliente: fecha de inicio, vencimiento, plan actual y si está activo. Úsalo SOLO cuando el cliente pregunte específicamente por su estado o vencimiento.",
+                parameters: {
+                    type: "object",
+                    properties: {
+                        phone: { type: "string", description: "El número de teléfono del usuario." }
+                    },
+                    required: ["phone"]
+                }
+            }
+        },
+        {
+            type: "function",
+            function: {
+                name: "generar_link_voz",
+                description: "Generar un enlace para que el cliente hable por VOZ con Sofía (asesoría hablada, entrenar conversando por voz). Úsalo cuando un miembro pida hablar por voz, una asesoría por voz o conversar por voz contigo. Devuelve un enlace personalizado que debes enviarle. Si el resultado indica que no es elegible, ofrécele renovar con calidez.",
                 parameters: {
                     type: "object",
                     properties: {
@@ -1421,6 +1488,7 @@ export async function processMessage(db: any, phone: string, messageText: string
        c) Pregúntale qué comida quiere ver ahora (Desayuno, Almuerzo o Cena) o si prefiere ver también la suplementación.
        d) EJEMPLO de respuesta ideal: "¡Hola Robert! 💪 Hoy es ${currentDay}, que corresponde a tu fase de *Variación Metabólica* (Días 4-5). ¿Quieres ver tu almuerzo de hoy o la suplementación pre-entreno? 🍗"
        e) Entrega las porciones de forma interactiva y con emojis de alimentos (🍗🥑🍳🥩).
+    14. ASESORÍA POR VOZ: Cuando un miembro te pida hablar por voz, una asesoría hablada o conversar/entrenar por voz contigo, usa 'generar_link_voz' con su teléfono y envíale con entusiasmo el enlace que devuelve para que hable por voz conmigo. Al enviar el enlace, dile con naturalidad que para que el micrófono funcione bien lo abra en su navegador (Chrome o Safari). Si el resultado indica que no es elegible (membresía vencida o inactiva), acompáñalo con calidez e invítalo a renovar, contándole que en cuanto active su membresía podrá usar la asesoría por voz.
     13. ESTILO DE RESPUESTA - REGLAS DE ORO:
        - SIEMPRE responde como si fueras una amiga mandando un WhatsApp, no como un blog ni un manual.
        - NUNCA uses negritas (*texto*) para subtítulos ni títulos dentro de la respuesta. Las negritas solo están permitidas para resaltar UNA palabra clave importante, no para crear estructura tipo artículo.
@@ -1472,10 +1540,11 @@ export async function processMessage(db: any, phone: string, messageText: string
             const functionResult = await executeTool(toolCall.function.name, toolArgs);
             console.log(`🛠️ Tool [${toolCall.function.name}] result:`, JSON.stringify(functionResult));
             if (toolCall.function.name === 'generate_payment_link' && functionResult?.url) {
-                if (toolArgs.paymentType === 'class_booking') {
+                const resolvedPaymentType = functionResult.paymentType || toolArgs.paymentType;
+                if (resolvedPaymentType === 'class_booking') {
                     const scheduleLabel = formatClassTimeLabel(String(toolArgs.desiredTime || extractDesiredTime(String(toolArgs.planName || ''))));
                     directToolReply = `Listo${clientFirstName ? ` ${clientFirstName}` : ''}. Aqui tienes tu link real para reservar tu clase grupal${scheduleLabel ? ` a las ${scheduleLabel}` : ''}. Son S/ 6 y puedes pagar por Yape o tarjeta en Culqi: ${functionResult.url}`;
-                } else if (toolArgs.paymentType === 'debt_payment') {
+                } else if (resolvedPaymentType === 'debt_payment') {
                     const debt = memberDoc && !memberDoc.empty ? Math.max(0, Number(memberDoc.docs[0].data().debt) || 0) : 0;
                     directToolReply = `Listo${clientFirstName ? ` ${clientFirstName}` : ''}. Aqui tienes tu link real para pagar tu deuda${debt > 0 ? ` de S/ ${debt.toFixed(2)}` : ''}: ${functionResult.url}`;
                 } else {
