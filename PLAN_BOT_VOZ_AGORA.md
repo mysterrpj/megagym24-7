@@ -1,5 +1,11 @@
 # PLAN: Voz con Agora lanzada desde el bot de WhatsApp (Sofía)
 
+> ✅ **COMPLETADO Y DESPLEGADO (2026-07-03).** Las 8 fases + la Sección 6 están en
+> producción y probadas end-to-end. Ver `ROLLBACK_VOZ.md` para reversibilidad y
+> `CONTEXTO_PROYECTO.md` (sección "Asesoría por Voz con Agora") para el estado vigente.
+> Este documento se conserva como referencia histórica del diseño. Pendiente opcional:
+> restringir por API la key de Gemini (no urgente; la key ya es server-side + secreto).
+
 > **Para el asistente IA que lea esto:** Esta es una función que toca **DOS proyectos**:
 > 1. `24-7chatmegagym` (este) — el bot de WhatsApp que genera el link + los datos del cliente.
 > 2. `agoravoz` (carpeta hermana) — la app de voz Agora + Gemini Live que abre el link.

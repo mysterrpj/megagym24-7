@@ -56,6 +56,7 @@ El proyecto es un sistema para la gestión de un gimnasio ("MegaGym") con un bot
 | `update_member_profile` | Guarda el perfil de entrenamiento del cliente (objetivo, nivel, días/semana, limitaciones). |
 | `get_payment_history` | Obtiene el historial de pagos del cliente. |
 | `check_member_status` | Consulta el estado de la membresía del cliente (solo si él lo pide). |
+| `generar_link_voz` | Genera un link para que un miembro elegible hable por VOZ con Sofía (Agora + Gemini Live). Firma un JWT corto y devuelve el enlace personalizado. Ver seccion "Asesoria por Voz". |
 
 ## Sistema de Dietas
 
@@ -194,6 +195,39 @@ Si el cliente expresa intención de pagar/renovar, Sofía celebra la decisión, 
 ### ⏳ Unificar nombre del remitente en WhatsApp
 
 **Pendiente:** Ir a Twilio Console → Messaging → Senders → WhatsApp Senders → tu número, y verificar/unificar el display name. También revisar en Meta Business Manager → WhatsApp Manager → tu número → Editar perfil.
+
+---
+
+## Asesoria por Voz con Agora (2026-07-03) - DESPLEGADO
+
+Sofia puede hablar por VOZ con los miembros. Es una funcion **aditiva y reversible**
+(ver `ROLLBACK_VOZ.md`). Toca tres proyectos: este bot, `agoravoz` (pagina de voz
+Agora + Gemini Live) y `AppWebMegagym` (web informativa).
+
+**Flujo:** un miembro elegible pide voz por WhatsApp -> el bot usa `generar_link_voz`,
+que firma un **JWT corto (15 min)** con `VOICE_LINK_SECRET` y arma un link a la pagina
+de voz -> al abrirlo, `agoravoz` canja el token (server-side) contra la Cloud Function
+`getVoiceContext`, que valida firma/vencimiento, re-verifica elegibilidad y devuelve un
+payload minimo (nombre, plan, dias para vencer, rutina) -> Sofia-voz saluda por su nombre.
+Sin token, la misma pagina es la **Sofia informativa publica** (planes, horarios).
+
+**Archivos:** `functions/src/tools/voiceLink.ts` (firma/verifica JWT HS256 con crypto
+nativo), tool `generar_link_voz` y Cloud Function `getVoiceContext` (en `index.ts`).
+
+**Reglas:**
+- Elegibilidad de voz = `status != inactive` y menos de 15 dias vencido (misma frontera
+  que el acceso a rutinas). Vencidos/inactivos no reciben link; Sofia invita a renovar.
+- v1 de **solo lectura**: los pagos NO se hacen por voz. Si el miembro quiere pagar,
+  Sofia-voz le dice que le pasa el link por WhatsApp.
+- Config en `functions/.env`: `VOICE_LINK_SECRET`, `VOICE_PAGE_URL`,
+  `VOICE_TOKEN_SINGLE_USE` (false por defecto). El secreto jamas va al repo/markdown/chat.
+- Datos oficiales de la Sofia informativa: 1 mes S/70, 2 meses S/120, 3 meses S/150,
+  interdiario S/50, clase/aerobicos S/6 (o S/80 al mes), WhatsApp 907 935 299.
+
+**URLs de produccion:**
+- Pagina de voz: `https://agoravoz-gemini-live--fit-ia-megagym.us-east4.hosted.app`
+- Validador: `https://us-central1-fit-ia-megagym.cloudfunctions.net/getVoiceContext`
+- Web informativa (con boton que abre la voz): `https://megagym-app-fa3dc.web.app`
 
 ---
 

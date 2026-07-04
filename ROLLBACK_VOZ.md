@@ -68,12 +68,33 @@ En `master`, `invite-agent` vuelve al agente demo original ("Ada" de Agora) y
 
 ---
 
-## Qué NO hay que revertir (sigue intacto)
+## Web informativa (`AppWebMegagym`) — feature flag implementado (Sección 6)
 
-- `AppWebMegagym/public/js/voice-client.js` (bot de voz Gemini directo) — **nunca se modificó**.
-  Si en algún momento se apuntó la web informativa a la página de Agora (Sección 6 del plan),
-  volver atrás = reapuntar el enlace en `AppWebMegagym` de vuelta a `voice-client.js`.
-  Mientras eso no se haya hecho, no hay nada que revertir en `AppWebMegagym`.
+El botón de micrófono del chat de la web ahora se controla con un **flag** en el
+`index.html` de la raíz (el de `public/` es una copia vieja, no se usa):
+
+```html
+<script>
+    window.MEGAGYM_VOICE_MODE = 'agora';   <!-- 'agora' o 'gemini' -->
+    window.MEGAGYM_VOICE_URL = 'https://agoravoz-gemini-live--fit-ia-megagym.us-east4.hosted.app';
+</script>
+```
+
+- `'agora'` → el botón abre la página de voz nueva en otra pestaña.
+- `'gemini'` → el botón vuelve al bot de voz clásico integrado (`voice-client.js`, que
+  sigue **intacto** y cargado).
+
+**Rollback de la web** = cambiar `'agora'` por `'gemini'` y `npm run deploy` (en
+`AppWebMegagym`). Rama de trabajo: `feature/voz-agora` (la previa es `main`).
+
+## URLs de producción (referencia)
+
+- Página de voz (App Hosting, backend `agoravoz-gemini-live`, us-east4):
+  `https://agoravoz-gemini-live--fit-ia-megagym.us-east4.hosted.app`
+- Validador de tokens: `https://us-central1-fit-ia-megagym.cloudfunctions.net/getVoiceContext`
+- Bot y functions: proyecto Firebase `fit-ia-megagym` · Web informativa: proyecto `megagym-app-fa3dc`.
+- Para **apagar del todo la página de voz**: pausar/borrar el backend `agoravoz-gemini-live`
+  en Firebase Console → App Hosting (no afecta al bot de WhatsApp).
 
 ---
 
