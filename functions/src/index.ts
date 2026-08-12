@@ -963,6 +963,47 @@ export const getVoiceContext = functions
                 console.error('getVoiceContext: error obteniendo rutina', e?.message);
             }
 
+            // Detalle completo de la rutina para que Sofía-voz explique los ejercicios.
+            let rutinaDetalle: string | null = null;
+            try {
+                const cleanPhone = String(phone).replace(/\s/g, '');
+                const base = cleanPhone.replace(/^\+?51/, '');
+                const formats = Array.from(new Set([
+                    cleanPhone,
+                    cleanPhone.startsWith('+') ? cleanPhone.slice(1) : '+' + cleanPhone,
+                    base,
+                    '+51' + base,
+                    '51' + base,
+                    'whatsapp:' + cleanPhone,
+                    'whatsapp:+' + base,
+                    'whatsapp:51' + base,
+                    'whatsapp:' + base
+                ]));
+                let detailData: any = null;
+                for (const fmt of formats) {
+                    const snap = await db.collection('studentRoutineAssignments')
+                        .where('studentPhone', '==', fmt)
+                        .limit(5)
+                        .get();
+                    if (!snap.empty) {
+                        detailData = snap.docs
+                            .map((d: any) => d.data())
+                            .filter((d: any) => d?.payload)
+                            .sort((a: any, b: any) => {
+                                const aDate = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(a.createdAt || 0);
+                                const bDate = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.createdAt || 0);
+                                return bDate.getTime() - aDate.getTime();
+                            })[0] || null;
+                        if (detailData) break;
+                    }
+                }
+                if (detailData) {
+                    rutinaDetalle = routineToText(detailData);
+                }
+            } catch (e: any) {
+                console.error('getVoiceContext: error obteniendo detalle de rutina', e?.message);
+            }
+
             const profile = member.trainingProfile || {};
             // Payload mínimo y seguro: solo lo necesario para personalizar la voz.
             res.status(200).json({
@@ -972,10 +1013,225 @@ export const getVoiceContext = functions
                 plan: member.plan || null,
                 objetivo: profile.objetivo || null,
                 rutinaResumen,
+                rutinaDetalle,
                 routineUrl
             });
         } catch (e: any) {
             console.error('❌ Error en getVoiceContext:', e);
+            res.status(500).json({ error: e.message });
+        }
+    });
+// ============ ASESORÍA POR VOZ — COACH PRO (entrenador) ============
+
+const COACH_METHODS: Record<number, string> = {
+    1: 'Triseries',
+    2: 'Biseries + Tempo',
+    3: 'Rest-Pause',
+    4: 'Preagotamiento',
+    5: 'FST-7',
+    6: 'Series Gigantes',
+    7: 'Myo-Reps',
+    8: 'Cluster Sets',
+    9: 'Dropsets Avanzados',
+    10: 'Contrastes',
+    11: 'BFR / Oclusión',
+    12: 'Combinación Inteligente',
+};
+
+function normalizeRoutinePayload(payload: any): any {
+    if (payload && payload.t) {
+        return {
+            title: payload.t,
+            slides: (payload.s || []).map((sl: any) => ({
+                dia: sl.d,
+                title: sl.t,
+                exercises: (sl.e || []).map((ex: any) => ({
+                    name: ex.n,
+                    sets: ex.s,
+                    reps: ex.r,
+                    rounds: ex.rd,
+                    tempo: ex.tp,
+                    rir: ex.ri,
+                    rest: ex.rs,
+                })),
+            })),
+        };
+    }
+    return payload;
+}
+
+function routineToText(data: any): string | null {
+    const payload = data?.payload;
+    if (!payload) return null;
+    const routine = normalizeRoutinePayload(payload);
+    const lines: string[] = [`TÍTULO: ${String(data?.title || routine?.title || 'Rutina')}`];
+    if (Array.isArray(routine?.slides)) {
+        for (const slide of routine.slides) {
+            lines.push('');
+            lines.push(`${slide?.dia ? slide.dia + ' · ' : ''}${slide?.title || ''}`);
+            if (Array.isArray(slide?.exercises)) {
+                for (const ex of slide.exercises) {
+                    let line = `- ${ex?.name || ''}: ${ex?.sets ?? ''} series x ${ex?.reps ?? ''} reps`;
+                    const extras: string[] = [];
+                    if (ex?.rounds && ex.rounds > 1) extras.push(`${ex.rounds} vueltas`);
+                    if (ex?.tempo) extras.push(`tempo ${ex.tempo}`);
+                    if (ex?.rir) extras.push(ex.rir);
+                    if (ex?.rest) extras.push(`descanso ${ex.rest}`);
+                    if (extras.length) line += ` (${extras.join(', ')})`;
+                    lines.push(line);
+                }
+            }
+        }
+    }
+    return lines.join('\n');
+}
+
+// Crea el link de voz del entrenador (Coach Pro) firmando un JWT con role=coach.
+export const createCoachVoiceLink = functions
+    .runWith({ memory: '256MB', timeoutSeconds: 30 })
+    .https.onRequest(async (req, res) => {
+        const appOrigins = [
+            process.env.RUTINAS_APP_URL || 'https://rutinas-robert.web.app',
+            'http://localhost:5173',
+            'http://127.0.0.1:5173',
+        ].filter(Boolean);
+        const requestOrigin = String(req.headers.origin || '');
+        if (appOrigins.includes(requestOrigin)) {
+            res.setHeader('Access-Control-Allow-Origin', requestOrigin);
+        }
+        res.setHeader('Vary', 'Origin');
+        res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+        if (req.method === 'OPTIONS') { res.status(204).send(''); return; }
+        if (req.method !== 'POST') { res.status(405).json({ error: 'method_not_allowed' }); return; }
+
+        try {
+            const secret = process.env.VOICE_LINK_SECRET;
+            if (!secret) { res.status(500).json({ error: 'not_configured' }); return; }
+
+            const mes = Number(req.body?.mes);
+            if (!Number.isInteger(mes) || mes < 1 || mes > 12) {
+                res.status(400).json({ error: 'invalid_mes' });
+                return;
+            }
+
+            const { signVoiceToken } = require('./tools/voiceLink');
+            const token = signVoiceToken({ role: 'coach', mes }, secret, 15 * 60);
+
+            const base = (process.env.VOICE_PAGE_URL || '').replace(/\/+$/, '');
+            if (!base) { res.status(500).json({ error: 'not_configured' }); return; }
+
+            res.status(200).json({ link: `${base}/?token=${token}&role=coach`, expiresInMinutes: 15 });
+        } catch (e: any) {
+            console.error('❌ Error en createCoachVoiceLink:', e);
+            res.status(500).json({ error: e.message });
+        }
+    });
+
+// Entrega el contexto del entrenador para el agente de voz Coach Pro.
+export const getCoachVoiceContext = functions
+    .runWith({ memory: '256MB', timeoutSeconds: 30 })
+    .https.onRequest(async (req, res) => {
+        const configuredOrigin = (process.env.VOICE_PAGE_URL || '').replace(/\/+$/, '');
+        const allowedOrigins = new Set([
+            configuredOrigin,
+            'http://localhost:3000',
+            'http://127.0.0.1:3000',
+            'http://localhost:5173',
+            'http://127.0.0.1:5173',
+        ].filter(Boolean));
+        const requestOrigin = String(req.headers.origin || '');
+        if (allowedOrigins.has(requestOrigin)) {
+            res.setHeader('Access-Control-Allow-Origin', requestOrigin);
+        }
+        res.setHeader('Vary', 'Origin');
+        res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+        if (req.method === 'OPTIONS') { res.status(204).send(''); return; }
+        if (req.method !== 'POST') { res.status(405).json({ error: 'method_not_allowed' }); return; }
+
+        try {
+            const secret = process.env.VOICE_LINK_SECRET;
+            if (!secret) { res.status(500).json({ error: 'not_configured' }); return; }
+
+            const token = String(req.body?.token || '').trim();
+            if (!token) { res.status(400).json({ error: 'missing_token' }); return; }
+
+            const { verifyVoiceToken } = require('./tools/voiceLink');
+            const result = verifyVoiceToken(token, secret);
+            if (!result.valid) {
+                res.status(401).json({ error: 'invalid_token', reason: result.reason });
+                return;
+            }
+            if (result.payload?.role !== 'coach') {
+                res.status(401).json({ error: 'invalid_token', reason: 'not_coach' });
+                return;
+            }
+
+            const mes = Number(result.payload?.mes);
+            const mesValido = Number.isInteger(mes) && mes >= 1 && mes <= 12;
+
+            const db = admin.firestore();
+
+            // Últimas rutinas compartidas (la más reciente y la anterior).
+            let ultimaRutina: string | null = null;
+            let rutinaAnterior: string | null = null;
+            try {
+                const snap = await db.collection('sharedRoutines')
+                    .orderBy('createdAt', 'desc')
+                    .limit(2)
+                    .get();
+                if (snap.docs[0]) ultimaRutina = routineToText(snap.docs[0].data());
+                if (snap.docs[1]) rutinaAnterior = routineToText(snap.docs[1].data());
+            } catch (e: any) {
+                console.error('getCoachVoiceContext: sin índice para ordenar, uso fallback', e?.message);
+                try {
+                    const snap = await db.collection('sharedRoutines').limit(2).get();
+                    if (snap.docs[0]) ultimaRutina = routineToText(snap.docs[0].data());
+                    if (snap.docs[1]) rutinaAnterior = routineToText(snap.docs[1].data());
+                } catch (e2: any) {
+                    console.error('getCoachVoiceContext: error leyendo rutinas', e2?.message);
+                }
+            }
+
+            // Alumnas activas (resumen, sin datos sensibles).
+            let alumnasActivas: Array<{ name: string | null; objetivo: string | null; plan: string | null }> = [];
+            try {
+                const membersSnap = await db.collection('members')
+                    .where('status', '==', 'active')
+                    .limit(10)
+                    .get();
+                alumnasActivas = membersSnap.docs.map((d: any) => {
+                    const m = d.data() || {};
+                    const profile = m.trainingProfile || {};
+                    return {
+                        name: String(m.name || '').split(' ')[0] || null,
+                        objetivo: profile.objetivo || null,
+                        plan: m.plan || null,
+                    };
+                }).filter((a: any) => a.name);
+            } catch (e: any) {
+                console.error('getCoachVoiceContext: error leyendo alumnas', e?.message);
+            }
+
+            res.status(200).json({
+                role: 'coach',
+                mes: mesValido ? mes : null,
+                metodo: mesValido ? (COACH_METHODS[mes] || null) : null,
+                ultimaRutina,
+                rutinaAnterior,
+                alumnasActivas,
+                gymData: {
+                    direccion: 'Mz I Lt 5, Montenegro, San Juan de Lurigancho',
+                    horarios: 'Lun-Vie 6am-10pm · Sáb 6am-6pm · Dom 6am-12pm',
+                    planes: '1 mes S/70 · 2 meses S/120 · 3 meses S/150 · Interdiario S/50 · Clase grupal S/6',
+                    whatsapp: '907 935 299',
+                },
+            });
+        } catch (e: any) {
+            console.error('❌ Error en getCoachVoiceContext:', e);
             res.status(500).json({ error: e.message });
         }
     });

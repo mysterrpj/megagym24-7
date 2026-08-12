@@ -1,0 +1,167 @@
+{
+  "endpoints": {
+    "twilioWebhookWhatsapp": {
+      "platform": "gcfv1",
+      "availableMemoryMb": 1024,
+      "timeoutSeconds": 120,
+      "minInstances": null,
+      "maxInstances": null,
+      "ingressSettings": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "httpsTrigger": {},
+      "entryPoint": "twilioWebhookWhatsapp"
+    },
+    "culqiWebhook": {
+      "platform": "gcfv1",
+      "availableMemoryMb": 512,
+      "timeoutSeconds": null,
+      "minInstances": null,
+      "maxInstances": null,
+      "ingressSettings": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "httpsTrigger": {},
+      "entryPoint": "culqiWebhook"
+    },
+    "createCulqiCharge": {
+      "platform": "gcfv1",
+      "availableMemoryMb": 512,
+      "timeoutSeconds": null,
+      "minInstances": null,
+      "maxInstances": null,
+      "ingressSettings": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "httpsTrigger": {},
+      "entryPoint": "createCulqiCharge"
+    },
+    "generateCulqiLink": {
+      "platform": "gcfv1",
+      "availableMemoryMb": 512,
+      "timeoutSeconds": null,
+      "minInstances": null,
+      "maxInstances": null,
+      "ingressSettings": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "httpsTrigger": {},
+      "entryPoint": "generateCulqiLink"
+    },
+    "sendManualWhatsAppMessage": {
+      "platform": "gcfv1",
+      "labels": {},
+      "availableMemoryMb": 512,
+      "timeoutSeconds": 120,
+      "minInstances": null,
+      "maxInstances": null,
+      "ingressSettings": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "callableTrigger": {},
+      "entryPoint": "sendManualWhatsAppMessage"
+    },
+    "membershipReminder": {
+      "platform": "gcfv1",
+      "availableMemoryMb": 512,
+      "timeoutSeconds": 300,
+      "minInstances": null,
+      "maxInstances": null,
+      "ingressSettings": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "scheduleTrigger": {
+        "schedule": "0 19 * * *",
+        "retryConfig": {
+          "retryCount": null,
+          "maxDoublings": null,
+          "maxRetryDuration": null,
+          "maxBackoffDuration": null,
+          "minBackoffDuration": null
+        },
+        "timeZone": "America/Lima"
+      },
+      "labels": {},
+      "entryPoint": "membershipReminder"
+    },
+    "classBookingReminder": {
+      "platform": "gcfv1",
+      "availableMemoryMb": 512,
+      "timeoutSeconds": 300,
+      "minInstances": null,
+      "maxInstances": null,
+      "ingressSettings": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "scheduleTrigger": {
+        "schedule": "*/30 * * * *",
+        "retryConfig": {
+          "retryCount": null,
+          "maxDoublings": null,
+          "maxRetryDuration": null,
+          "maxBackoffDuration": null,
+          "minBackoffDuration": null
+        },
+        "timeZone": "America/Lima"
+      },
+      "labels": {},
+      "entryPoint": "classBookingReminder"
+    },
+    "serveVoucher": {
+      "platform": "gcfv1",
+      "availableMemoryMb": 512,
+      "timeoutSeconds": null,
+      "minInstances": null,
+      "maxInstances": null,
+      "ingressSettings": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "httpsTrigger": {},
+      "entryPoint": "serveVoucher"
+    },
+    "getVoiceContext": {
+      "platform": "gcfv1",
+      "availableMemoryMb": 256,
+      "timeoutSeconds": 30,
+      "minInstances": null,
+      "maxInstances": null,
+      "ingressSettings": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "httpsTrigger": {},
+      "entryPoint": "getVoiceContext"
+    },
+    "createCoachVoiceLink": {
+      "platform": "gcfv1",
+      "availableMemoryMb": 256,
+      "timeoutSeconds": 30,
+      "minInstances": null,
+      "maxInstances": null,
+      "ingressSettings": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "httpsTrigger": {},
+      "entryPoint": "createCoachVoiceLink"
+    },
+    "getCoachVoiceContext": {
+      "platform": "gcfv1",
+      "availableMemoryMb": 256,
+      "timeoutSeconds": 30,
+      "minInstances": null,
+      "maxInstances": null,
+      "ingressSettings": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "httpsTrigger": {},
+      "entryPoint": "getCoachVoiceContext"
+    }
+  },
+  "specVersion": "v1alpha1",
+  "requiredAPIs": [
+    {
+      "api": "cloudscheduler.googleapis.com",
+      "reason": "Needed for scheduled functions."
+    }
+  ],
+  "extensions": {}
+}
