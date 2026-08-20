@@ -1232,39 +1232,33 @@ export const getVoiceTestRealtimeToken = functions
             return;
         }
         const requested = String(req.body?.model || '').trim();
-        const candidates = Array.from(new Set(
-            requested
-                ? [requested, 'gpt-realtime', 'gpt-4o-realtime-preview']
-                : ['gpt-realtime', 'gpt-4o-realtime-preview']
-        ));
-        for (const model of candidates) {
-            try {
-                const response = await fetch('https://api.openai.com/v1/realtime/sessions', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${apiKey}`
-                    },
-                    body: JSON.stringify({
-                        model,
-                        modalities: ['audio', 'text'],
-                        voice: 'alloy',
-                        instructions: 'Eres Sofía, la asistente de voz de prueba de MegaGym. Hablas español peruano, con energía y cercanía. Responde breve y natural.'
-                    })
-                });
-                if (!response.ok) {
-                    const errText = await response.text();
-                    console.error(`getVoiceTestRealtimeToken ${model}:`, response.status, errText.slice(0, 300));
-                    continue;
-                }
-                const data = await response.json();
-                res.status(200).json({ clientSecret: data.client_secret?.value || '', model });
+        const model = requested || 'gpt-realtime';
+        try {
+            const response = await fetch('https://api.openai.com/v1/realtime/client_secrets', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${apiKey}`
+                },
+                body: JSON.stringify({})
+            });
+            if (!response.ok) {
+                const errText = await response.text();
+                console.error('getVoiceTestRealtimeToken client_secrets:', response.status, errText.slice(0, 300));
+                res.status(502).json({ error: 'openai_rejected', detail: errText.slice(0, 200) });
                 return;
-            } catch (e: any) {
-                console.error('getVoiceTestRealtimeToken error:', e?.message);
             }
+            const data = await response.json();
+            const clientSecret = data.value || data.client_secret?.value || '';
+            if (!clientSecret) {
+                res.status(502).json({ error: 'openai_no_secret' });
+                return;
+            }
+            res.status(200).json({ clientSecret, model });
+        } catch (e: any) {
+            console.error('getVoiceTestRealtimeToken error:', e?.message);
+            res.status(500).json({ error: String(e?.message || 'openai_error') });
         }
-        res.status(500).json({ error: 'no_realtime_session' });
     });
 
 const COACH_METHODS: Record<number, string> = {
