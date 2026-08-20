@@ -154,6 +154,18 @@
       "vpc": null,
       "httpsTrigger": {},
       "entryPoint": "getCoachVoiceContext"
+    },
+    "saveVoiceSessionMemory": {
+      "platform": "gcfv1",
+      "availableMemoryMb": 512,
+      "timeoutSeconds": 60,
+      "minInstances": null,
+      "maxInstances": null,
+      "ingressSettings": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "httpsTrigger": {},
+      "entryPoint": "saveVoiceSessionMemory"
     }
   },
   "specVersion": "v1alpha1",
