@@ -1248,9 +1248,11 @@ export async function processMessage(db: any, phone: string, messageText: string
         const data = memberDoc.docs[0].data();
         clientFirstName = (data.name || '').split(' ')[0];
         const persistedMemory = data.assistantMemory || {};
-        if (!savedMemory?.memory?.ultimaInteraccionClave && (persistedMemory.ultimaInteraccionClave || persistedMemory.resumenConversacional || persistedMemory.ultimaSesionVozResumen)) {
-            const sharedSummary = persistedMemory.ultimaSesionVozResumen || persistedMemory.resumenConversacional || persistedMemory.ultimaInteraccionTexto || 'N/A';
-            memoryContext = `Ultima interaccion clave: ${persistedMemory.ultimaInteraccionClave || 'N/A'}. Ultimo canal: ${persistedMemory.ultimoCanal || 'WhatsApp'}. Resumen relevante: ${String(sharedSummary).slice(0, 700)}.`;
+        const voiceSummary = persistedMemory.ultimaSesionVozResumen || persistedMemory.resumenConversacional || '';
+        if (voiceSummary) {
+            const summaryText = String(voiceSummary).slice(0, 700);
+            const voiceContext = `Ultima interaccion clave: ${persistedMemory.ultimaInteraccionClave || 'Conversación reciente por voz'}. Ultimo canal: ${persistedMemory.ultimoCanal || 'voz'}. Resumen de lo hablado: ${summaryText}.`;
+            memoryContext = memoryContext.startsWith('Sin memoria') ? voiceContext : `${memoryContext} ${voiceContext}`;
         }
 
         // Perfil de entrenamiento
