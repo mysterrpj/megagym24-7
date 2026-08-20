@@ -1171,6 +1171,102 @@ export const saveVoiceSessionMemory = functions
             res.status(500).json({ error: e.message });
         }
     });
+
+function applyTestCors(req: any, res: any) {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+}
+
+export const getVoiceTestGeminiToken = functions
+    .runWith({ memory: '256MB', timeoutSeconds: 60 })
+    .https.onRequest(async (req, res) => {
+        applyTestCors(req, res);
+        if (req.method === 'OPTIONS') {
+            res.status(204).send('');
+            return;
+        }
+        if (req.method !== 'POST') {
+            res.status(405).json({ error: 'method_not_allowed' });
+            return;
+        }
+        try {
+            const apiKey = process.env.GEMINI_API_KEY;
+            if (!apiKey) {
+                res.status(500).json({ error: 'gemini_not_configured' });
+                return;
+            }
+            const { GoogleGenAI } = await import('@google/genai');
+            const client = new GoogleGenAI({ apiKey });
+            const token = await client.authTokens.create({
+                config: {
+                    uses: 1,
+                    expireTime: new Date(Date.now() + (30 * 60 * 1000)).toISOString(),
+                    newSessionExpireTime: new Date(Date.now() + (60 * 1000)).toISOString(),
+                    httpOptions: { apiVersion: 'v1alpha' }
+                }
+            });
+            const tokenName = (token as any).name || (token as any).token || '';
+            res.status(200).json({ token: tokenName });
+        } catch (e: any) {
+            console.error('getVoiceTestGeminiToken error:', e?.message);
+            res.status(500).json({ error: String(e?.message || 'gemini_token_error') });
+        }
+    });
+
+export const getVoiceTestRealtimeToken = functions
+    .runWith({ memory: '256MB', timeoutSeconds: 60 })
+    .https.onRequest(async (req, res) => {
+        applyTestCors(req, res);
+        if (req.method === 'OPTIONS') {
+            res.status(204).send('');
+            return;
+        }
+        if (req.method !== 'POST') {
+            res.status(405).json({ error: 'method_not_allowed' });
+            return;
+        }
+        const apiKey = process.env.OPENAI_API_KEY;
+        if (!apiKey) {
+            res.status(500).json({ error: 'openai_not_configured' });
+            return;
+        }
+        const requested = String(req.body?.model || '').trim();
+        const candidates = Array.from(new Set(
+            requested
+                ? [requested, 'gpt-realtime', 'gpt-4o-realtime-preview']
+                : ['gpt-realtime', 'gpt-4o-realtime-preview']
+        ));
+        for (const model of candidates) {
+            try {
+                const response = await fetch('https://api.openai.com/v1/realtime/sessions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${apiKey}`
+                    },
+                    body: JSON.stringify({
+                        model,
+                        modalities: ['audio', 'text'],
+                        voice: 'alloy',
+                        instructions: 'Eres Sofía, la asistente de voz de prueba de MegaGym. Hablas español peruano, con energía y cercanía. Responde breve y natural.'
+                    })
+                });
+                if (!response.ok) {
+                    const errText = await response.text();
+                    console.error(`getVoiceTestRealtimeToken ${model}:`, response.status, errText.slice(0, 300));
+                    continue;
+                }
+                const data = await response.json();
+                res.status(200).json({ clientSecret: data.client_secret?.value || '', model });
+                return;
+            } catch (e: any) {
+                console.error('getVoiceTestRealtimeToken error:', e?.message);
+            }
+        }
+        res.status(500).json({ error: 'no_realtime_session' });
+    });
+
 const COACH_METHODS: Record<number, string> = {
     1: 'Triseries',
     2: 'Biseries + Tempo',

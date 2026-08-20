@@ -166,6 +166,30 @@
       "vpc": null,
       "httpsTrigger": {},
       "entryPoint": "saveVoiceSessionMemory"
+    },
+    "getVoiceTestGeminiToken": {
+      "platform": "gcfv1",
+      "availableMemoryMb": 256,
+      "timeoutSeconds": 60,
+      "minInstances": null,
+      "maxInstances": null,
+      "ingressSettings": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "httpsTrigger": {},
+      "entryPoint": "getVoiceTestGeminiToken"
+    },
+    "getVoiceTestRealtimeToken": {
+      "platform": "gcfv1",
+      "availableMemoryMb": 256,
+      "timeoutSeconds": 60,
+      "minInstances": null,
+      "maxInstances": null,
+      "ingressSettings": null,
+      "serviceAccountEmail": null,
+      "vpc": null,
+      "httpsTrigger": {},
+      "entryPoint": "getVoiceTestRealtimeToken"
     }
   },
   "specVersion": "v1alpha1",
