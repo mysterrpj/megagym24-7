@@ -24,6 +24,73 @@ async function findMemberByPhone(db: any, phone: string) {
     }
     return null;
 }
+function applyVoiceCors(req: any, res: any) {
+    const configuredOrigin = (process.env.VOICE_PAGE_URL || '').replace(/\/+$/, '');
+    const allowedOrigins = new Set([
+        configuredOrigin,
+        'http://localhost:3000',
+        'http://127.0.0.1:3000'
+    ].filter(Boolean));
+    const requestOrigin = String(req.headers.origin || '');
+    if (allowedOrigins.has(requestOrigin)) {
+        res.setHeader('Access-Control-Allow-Origin', requestOrigin);
+    }
+    res.setHeader('Vary', 'Origin');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+}
+
+function normalizeVoiceTranscript(rawTranscript: any): Array<{ role: 'user' | 'assistant'; content: string }> {
+    if (!Array.isArray(rawTranscript)) return [];
+    return rawTranscript
+        .map((item: any) => {
+            const role: 'user' | 'assistant' = item?.role === 'assistant' ? 'assistant' : 'user';
+            const content = String(item?.content || item?.text || '').replace(/\s+/g, ' ').trim();
+            return { role, content };
+        })
+        .filter((item) => item.content.length > 0)
+        .slice(-30);
+}
+
+function buildVoiceTranscriptText(transcript: Array<{ role: 'user' | 'assistant'; content: string }>) {
+    return transcript
+        .map((item) => `${item.role === 'assistant' ? 'Sofia voz' : 'Cliente'}: ${item.content}`)
+        .join('\n')
+        .slice(0, 10000);
+}
+
+async function summarizeVoiceTranscript(transcript: Array<{ role: 'user' | 'assistant'; content: string }>) {
+    const transcriptText = buildVoiceTranscriptText(transcript);
+    if (!transcriptText) return '';
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey || apiKey === 'placeholder-key') return transcriptText.slice(-700);
+
+    try {
+        const OpenAI = require('openai');
+        const openai = new OpenAI({ apiKey });
+        const response = await openai.chat.completions.create({
+            model: process.env.OPENAI_MEMORY_SUMMARY_MODEL || process.env.OPENAI_DEFAULT_CHAT_MODEL || 'gpt-4o-mini',
+            messages: [
+                { role: 'system', content: 'Resume una llamada de voz entre Sofia de MegaGym y un cliente. Devuelve 2-4 frases utiles para continuidad futura por WhatsApp. Incluye solo datos relevantes: objetivo, molestias, rutina, dieta, progreso, dudas o compromisos. No inventes nada.' },
+                { role: 'user', content: transcriptText }
+            ],
+            temperature: 0.2
+        });
+        return String(response.choices?.[0]?.message?.content || '').trim().slice(0, 900);
+    } catch (e: any) {
+        console.error('saveVoiceSessionMemory: error resumiendo transcript', e?.message);
+        return transcriptText.slice(-700);
+    }
+}
+
+function pickVoiceInteractionKey(transcript: Array<{ role: 'user' | 'assistant'; content: string }>) {
+    const text = transcript.filter((item) => item.role === 'user').map((item) => item.content).join(' ').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    if (text.includes('dieta') || text.includes('comida') || text.includes('antojo') || text.includes('ansiedad')) return 'Converso por voz sobre nutricion';
+    if (text.includes('dolor') || text.includes('molestia') || text.includes('lesion')) return 'Converso por voz sobre molestia o lesion';
+    if (text.includes('rutina') || text.includes('ejercicio') || text.includes('entren')) return 'Converso por voz sobre entrenamiento';
+    if (text.includes('pagar') || text.includes('renovar') || text.includes('membresia')) return 'Converso por voz sobre membresia o pago';
+    return 'Converso por voz con Sofia';
+}
 
 function getLimaDateString(date = new Date()) {
     const formatter = new Intl.DateTimeFormat('en-CA', {
@@ -1005,6 +1072,7 @@ export const getVoiceContext = functions
             }
 
             const profile = member.trainingProfile || {};
+            const assistantMemory = member.assistantMemory || {};
             // Payload mínimo y seguro: solo lo necesario para personalizar la voz.
             res.status(200).json({
                 name: (member.name || '').split(' ')[0] || null,
@@ -1012,6 +1080,13 @@ export const getVoiceContext = functions
                 diasParaVencer: daysUntilExpiry,
                 plan: member.plan || null,
                 objetivo: profile.objetivo || null,
+                assistantMemory: {
+                    ultimaInteraccionClave: assistantMemory.ultimaInteraccionClave || null,
+                    ultimaInteraccionTexto: assistantMemory.ultimaInteraccionTexto || null,
+                    resumenConversacional: assistantMemory.resumenConversacional || null,
+                    ultimaSesionVozResumen: assistantMemory.ultimaSesionVozResumen || null,
+                    ultimoCanal: assistantMemory.ultimoCanal || null
+                },
                 rutinaResumen,
                 rutinaDetalle,
                 routineUrl
@@ -1023,6 +1098,79 @@ export const getVoiceContext = functions
     });
 // ============ ASESORÍA POR VOZ — COACH PRO (entrenador) ============
 
+export const saveVoiceSessionMemory = functions
+    .runWith({ memory: '512MB', timeoutSeconds: 60 })
+    .https.onRequest(async (req, res) => {
+        applyVoiceCors(req, res);
+        if (req.method === 'OPTIONS') {
+            res.status(204).send('');
+            return;
+        }
+        if (req.method !== 'POST') {
+            res.status(405).json({ error: 'method_not_allowed' });
+            return;
+        }
+        try {
+            const secret = process.env.VOICE_LINK_SECRET;
+            if (!secret) {
+                res.status(500).json({ error: 'not_configured' });
+                return;
+            }
+            const token = String(req.body?.token || '').trim();
+            if (!token) {
+                res.status(400).json({ error: 'missing_token' });
+                return;
+            }
+            const { verifyVoiceToken } = require('./tools/voiceLink');
+            const result = verifyVoiceToken(token, secret);
+            if (!result.valid) {
+                res.status(401).json({ error: 'invalid_token', reason: result.reason });
+                return;
+            }
+            const phone = String(result.payload?.phone || '').trim();
+            if (!phone) {
+                res.status(401).json({ error: 'invalid_token', reason: 'no_phone' });
+                return;
+            }
+            const transcript = normalizeVoiceTranscript(req.body?.transcript);
+            if (transcript.length === 0) {
+                res.status(400).json({ error: 'empty_transcript' });
+                return;
+            }
+            const adminInner = require('firebase-admin');
+            if (!adminInner.apps.length) adminInner.initializeApp();
+            const db = adminInner.firestore();
+            const memberDoc = await findMemberByPhone(db, phone);
+            if (!memberDoc) {
+                res.status(404).json({ error: 'member_not_found' });
+                return;
+            }
+            const summary = await summarizeVoiceTranscript(transcript);
+            if (!summary) {
+                res.status(400).json({ error: 'empty_summary' });
+                return;
+            }
+            const member = memberDoc.data() || {};
+            const previousMemory = member.assistantMemory || {};
+            const now = adminInner.firestore.FieldValue.serverTimestamp();
+            await memberDoc.ref.set({
+                assistantMemory: {
+                    ...previousMemory,
+                    ultimaInteraccionClave: pickVoiceInteractionKey(transcript),
+                    ultimaInteraccionTexto: summary.slice(0, 220),
+                    ultimaSesionVozResumen: summary,
+                    resumenConversacional: summary,
+                    ultimoCanal: 'voz',
+                    updatedAt: now,
+                    lastVoiceSessionAt: now
+                }
+            }, { merge: true });
+            res.status(200).json({ saved: true, summary });
+        } catch (e: any) {
+            console.error('Error en saveVoiceSessionMemory:', e);
+            res.status(500).json({ error: e.message });
+        }
+    });
 const COACH_METHODS: Record<number, string> = {
     1: 'Triseries',
     2: 'Biseries + Tempo',
