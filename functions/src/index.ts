@@ -1073,6 +1073,21 @@ export const getVoiceContext = functions
 
             const profile = member.trainingProfile || {};
             const assistantMemory = member.assistantMemory || {};
+
+            // Proveedor de voz activo (selector del panel admin). Default: Agora.
+            let voiceProvider = 'agora';
+            let voiceModel: string | null = null;
+            try {
+                const voiceCfg = await db.collection('settings').doc('voice').get();
+                if (voiceCfg.exists) {
+                    const cfg = voiceCfg.data() || {};
+                    const p = String(cfg.provider || 'agora');
+                    voiceProvider = ['agora', 'gemini', 'gpt-realtime-mini'].includes(p) ? p : 'agora';
+                    voiceModel = cfg.model ? String(cfg.model) : null;
+                }
+            } catch (e: any) {
+                console.error('getVoiceContext: error leyendo settings/voice', e?.message);
+            }
             // Payload mínimo y seguro: solo lo necesario para personalizar la voz.
             res.status(200).json({
                 name: (member.name || '').split(' ')[0] || null,
@@ -1089,7 +1104,8 @@ export const getVoiceContext = functions
                 },
                 rutinaResumen,
                 rutinaDetalle,
-                routineUrl
+                routineUrl,
+                voice: { provider: voiceProvider, model: voiceModel }
             });
         } catch (e: any) {
             console.error('❌ Error en getVoiceContext:', e);

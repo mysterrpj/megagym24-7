@@ -3,8 +3,8 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
-import { Building2, Save, Clock, Phone, Mail, MessageSquare } from 'lucide-react';
-import { doc, getDoc, setDoc, collection, writeBatch } from 'firebase/firestore';
+import { Building2, Save, Clock, Phone, Mail, MessageSquare, Mic } from 'lucide-react';
+import { doc, getDoc, setDoc, collection, writeBatch, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
 export function SettingsPage() {
@@ -82,6 +82,56 @@ export function SettingsPage() {
         };
         loadConfig();
     }, []);
+
+    // --- Voz de Sofia: proveedor activo (Agora | Gemini | GPT-Realtime mini) ---
+    const [voiceProvider, setVoiceProvider] = useState<'agora' | 'gemini' | 'gpt-realtime-mini'>('agora');
+    const [voiceModel, setVoiceModel] = useState<string>('');
+    const [voiceUpdatedAt, setVoiceUpdatedAt] = useState<string | null>(null);
+    const [savingVoice, setSavingVoice] = useState(false);
+
+    useEffect(() => {
+        const loadVoice = async () => {
+            try {
+                const snap = await getDoc(doc(db, 'settings', 'voice'));
+                if (snap.exists()) {
+                    const data = snap.data() as any;
+                    if (['agora', 'gemini', 'gpt-realtime-mini'].includes(data.provider)) {
+                        setVoiceProvider(data.provider);
+                    }
+                    setVoiceModel(data.model || '');
+                    setVoiceUpdatedAt(data.updatedAt || null);
+                }
+            } catch (e) {
+                console.error('Error cargando settings/voice', e);
+            }
+        };
+        loadVoice();
+    }, []);
+
+    const handleSetVoiceProvider = async (provider: 'agora' | 'gemini' | 'gpt-realtime-mini', model: string) => {
+        setSavingVoice(true);
+        try {
+            await setDoc(
+                doc(db, 'settings', 'voice'),
+                {
+                    provider,
+                    model: model || null,
+                    updatedAt: serverTimestamp(),
+                    updatedBy: 'admin',
+                },
+                { merge: true },
+            );
+            setVoiceProvider(provider);
+            setVoiceModel(model);
+            setVoiceUpdatedAt(new Date().toLocaleString());
+            alert('Voz de Sofia actualizada: ' + provider);
+        } catch (e) {
+            console.error(e);
+            alert('Error guardando el proveedor de voz: ' + e);
+        } finally {
+            setSavingVoice(false);
+        }
+    };
 
     const handleSave = async () => {
         setLoading(true);
@@ -208,6 +258,69 @@ export function SettingsPage() {
                             className="bg-neutral-800 border-neutral-700 text-white"
                         />
                     </div>
+                </CardContent>
+            </Card>
+
+            <Card className="bg-neutral-900 border-neutral-800">
+                <CardHeader>
+                    <div className="flex items-center gap-2 text-green-500 mb-2">
+                        <Mic className="w-5 h-5" />
+                        <h3 className="font-semibold">Voz de Sofia</h3>
+                    </div>
+                    <CardTitle className="text-gray-400 text-sm font-normal">
+                        Elige el proveedor de voz para las llamadas de los miembros
+                        {voiceUpdatedAt ? ' - ultimo cambio: ' + voiceUpdatedAt : ''}
+                    </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <button
+                            type="button"
+                            disabled={savingVoice}
+                            onClick={() => handleSetVoiceProvider('agora', '')}
+                            className={[
+                                'rounded-lg border p-4 text-left transition',
+                                voiceProvider === 'agora'
+                                    ? 'border-green-500 bg-green-500/10'
+                                    : 'border-neutral-700 bg-neutral-800/50 hover:border-neutral-500',
+                            ].join(' ')}
+                        >
+                            <div className="font-semibold text-white">Agora + Gemini</div>
+                            <div className="text-xs text-gray-400 mt-1">El sistema actual</div>
+                        </button>
+                        <button
+                            type="button"
+                            disabled={savingVoice}
+                            onClick={() => handleSetVoiceProvider('gemini', 'gemini-3.1-flash-live-preview')}
+                            className={[
+                                'rounded-lg border p-4 text-left transition',
+                                voiceProvider === 'gemini'
+                                    ? 'border-green-500 bg-green-500/10'
+                                    : 'border-neutral-700 bg-neutral-800/50 hover:border-neutral-500',
+                            ].join(' ')}
+                        >
+                            <div className="font-semibold text-white">Gemini Live</div>
+                            <div className="text-xs text-gray-400 mt-1">Directo, sin Agora. Con interrupcion</div>
+                        </button>
+                        <button
+                            type="button"
+                            disabled={savingVoice}
+                            onClick={() => handleSetVoiceProvider('gpt-realtime-mini', 'gpt-realtime-mini')}
+                            className={[
+                                'rounded-lg border p-4 text-left transition',
+                                voiceProvider === 'gpt-realtime-mini'
+                                    ? 'border-green-500 bg-green-500/10'
+                                    : 'border-neutral-700 bg-neutral-800/50 hover:border-neutral-500',
+                            ].join(' ')}
+                        >
+                            <div className="font-semibold text-white">GPT-Realtime mini</div>
+                            <div className="text-xs text-gray-400 mt-1">OpenAI directo (~3 cent/min)</div>
+                        </button>
+                    </div>
+                    <p className="text-xs text-gray-500">
+                        El cambio es inmediato: las llamadas nuevas usaran el proveedor elegido.
+                        {voiceModel ? ' Modelo: ' + voiceModel : ''}
+                    </p>
                 </CardContent>
             </Card>
 

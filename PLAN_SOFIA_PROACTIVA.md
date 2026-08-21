@@ -82,3 +82,10 @@ No implementar todavia. Por ahora Sofia solo guarda seguimiento ligero para ayud
 - CRM conversacional completo.
 - Envio manual desde dashboard.
 - Modulo nutricional avanzado.
+
+## 🔴 URGENTE - Claves Gemini (recordatorio)
+
+- [ ] La proxima semana: cargar saldo (min. S/40) en el proyecto `agentevozmegagym` (`gen-lang-client-0174182024`) para reactivar las claves "MegaGym Voz Bot" y "MegaGym Voz Web".
+- [ ] No borrar la clave vieja "Meganutri" hasta confirmar que las claves nuevas funcionan con saldo.
+- [ ] Revisar la asistente de la landing ("MegaGym Voz Web"): quedo bloqueada con facturacion $0 y solo se reactiva con saldo o desvinculando la facturacion.
+- Las claves ya estan dentro del proyecto: al cargar saldo se reactivan solas. No hace falta crear claves nuevas ni pasarlas de nuevo.
