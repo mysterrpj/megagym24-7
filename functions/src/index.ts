@@ -1483,6 +1483,21 @@ export const getCoachVoiceContext = functions
                 console.error('getCoachVoiceContext: error leyendo alumnas', e?.message);
             }
 
+            // Proveedor de voz activo (selector del panel admin). Default: Agora.
+            let voiceProvider = 'agora';
+            let voiceModel: string | null = null;
+            try {
+                const voiceCfg = await db.collection('settings').doc('voice').get();
+                if (voiceCfg.exists) {
+                    const cfg = voiceCfg.data() || {};
+                    const p = String(cfg.provider || 'agora');
+                    voiceProvider = ['agora', 'gemini', 'gpt-realtime-mini'].includes(p) ? p : 'agora';
+                    voiceModel = cfg.model ? String(cfg.model) : null;
+                }
+            } catch (e: any) {
+                console.error('getCoachVoiceContext: error leyendo settings/voice', e?.message);
+            }
+
             res.status(200).json({
                 role: 'coach',
                 mes: mesValido ? mes : null,
@@ -1496,6 +1511,7 @@ export const getCoachVoiceContext = functions
                     planes: '1 mes S/70 · 2 meses S/120 · 3 meses S/150 · Interdiario S/50 · Clase grupal S/6',
                     whatsapp: '907 935 299',
                 },
+                voice: { provider: voiceProvider, model: voiceModel },
             });
         } catch (e: any) {
             console.error('❌ Error en getCoachVoiceContext:', e);
