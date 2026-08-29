@@ -77,7 +77,8 @@ Incluye:
 
 Pendiente recomendado:
 
-- terminar el portal del miembro con datos reales;
+- dejar el portal del miembro como pendiente futuro, porque hoy los clientes interactuan principalmente por WhatsApp;
+- empezar por un modulo simple de asistencia/acceso desde Sofia, sin hardware todavia;
 - mejorar reglas de seguridad de Firestore;
 - migrar `functions.config()` a parametros antes de marzo 2027;
 - planificar migracion de runtime `Node.js 20`.
@@ -107,7 +108,63 @@ Opciones de identificacion:
 
 Recomendacion inicial:
 
-Empezar con QR o PIN. Es mas simple, barato y facil de depurar que biometria.
+Empezar por WhatsApp/Sofia y registro interno, sin abrir puerta todavia. Despues probar QR o PIN. Es mas simple, barato y facil de depurar que biometria.
+
+### Fase 2A - Inicio recomendado ahora: acceso por WhatsApp sin hardware
+
+Esta es la primera fase practica para MegaGym, porque los clientes ya usan a Sofia por WhatsApp. Para el detalle tecnico de esta fase, usar `PLAN_ACCESO_WHATSAPP.md`.
+
+Objetivo:
+
+Validar el flujo de acceso antes de comprar chapa, camaras o lectores.
+
+Flujo inicial:
+
+1. Cliente escribe a Sofia: `quiero ingresar`, `estoy en la puerta`, `voy a entrar` o algo similar.
+2. Sofia identifica al cliente por su numero de WhatsApp.
+3. El backend revisa su documento en `members`.
+4. Si tiene acceso habilitado, registra un ingreso en `accessLogs`.
+5. Sofia responde de forma breve indicando que el ingreso quedo registrado.
+6. Si esta vencido o inactivo, Sofia responde con tacto segun las reglas actuales del bot.
+
+Alcance de esta fase:
+
+- no abre puerta real;
+- no requiere comprar hardware;
+- no requiere portal del miembro;
+- solo valida reglas, datos y registro de ingresos;
+- prepara la base para conectar una chapa despues.
+
+Intenciones que Sofia deberia reconocer cuando se implemente:
+
+- `quiero ingresar`
+- `estoy en la puerta`
+- `voy a entrar`
+- `registrame mi ingreso`
+- `marcar asistencia`
+- `ya llegue al gym`
+
+Resultado esperado:
+
+- Crear registros reales en `accessLogs`.
+- Ver en el panel cuantos clientes ingresaron.
+- Detectar miembros activos, vencidos e inactivos.
+- Tener historial antes de automatizar la puerta fisica.
+
+### Portal del miembro como pendiente futuro
+
+El portal web para clientes sigue siendo importante, pero no es el primer paso operativo.
+
+Se mantiene como pendiente para mas adelante:
+
+- login del cliente;
+- vinculacion `usuario web -> miembro real por telefono`;
+- vista de membresia, deuda, rutina, dieta y clases;
+- QR personal para ingreso;
+- pagos desde el portal;
+- historial del cliente.
+
+Cuando se retome, usar `PLAN_PORTAL_MIEMBRO.md` como guia. La vinculacion por telefono sera necesaria para que el portal sepa que el usuario web es el mismo cliente que Sofia conoce por WhatsApp.
 
 Colecciones sugeridas:
 
@@ -312,16 +369,17 @@ Mitigacion:
 
 ## Orden realista de implementacion
 
-1. Terminar portal del miembro.
-2. Endurecer reglas de seguridad.
-3. Crear modulo de asistencia/accesos en software, sin puerta todavia.
-4. Probar QR/PIN con registros manuales.
-5. Conectar una chapa/controlador en modo piloto.
-6. Agregar alertas de acceso.
-7. Integrar camaras basicas.
-8. Crear inventario y ventas.
-9. Agregar reportes inteligentes.
-10. Automatizar musica, luces y ambiente.
+1. Crear modulo de asistencia/acceso por WhatsApp sin hardware.
+2. Registrar ingresos en `accessLogs`.
+3. Mostrar ingresos basicos en el panel admin.
+4. Probar reglas de acceso con clientes reales durante unos dias.
+5. Endurecer reglas de seguridad de Firestore antes de exponer mas datos.
+6. Retomar portal del miembro cuando el flujo por WhatsApp ya este validado.
+7. Agregar QR/PIN para ingreso.
+8. Conectar una chapa/controlador en modo piloto.
+9. Integrar camaras basicas y alertas.
+10. Crear inventario, ventas y reportes inteligentes.
+11. Automatizar musica, luces y ambiente.
 
 ## Que no implementar todavia
 
@@ -338,10 +396,11 @@ Mitigacion:
 Para MegaGym, la mejor ruta es:
 
 1. Consolidar el sistema actual.
-2. Terminar el portal del miembro.
+2. Implementar primero acceso/asistencia por WhatsApp con Sofia, sin hardware.
 3. Preparar un modulo `accessLogs` en Firestore.
-4. Probar acceso con QR o PIN antes de comprar hardware definitivo.
-5. Comprar hardware solo cuando el flujo digital ya este validado.
+4. Probar el flujo con clientes reales y panel admin.
+5. Dejar el portal del miembro como fase posterior, usando `PLAN_PORTAL_MIEMBRO.md`.
+6. Comprar hardware solo cuando el flujo digital ya este validado.
 
 Esto mantiene el proyecto modular y evita gastar en equipos que luego no se puedan integrar.
 
