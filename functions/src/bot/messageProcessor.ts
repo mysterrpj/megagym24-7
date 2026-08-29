@@ -619,6 +619,43 @@ async function reserveClass(db: any, adminInner: any, args: any) {
     });
 }
 
+
+function normalizePhoneDigits(value: string) {
+    let digits = String(value || '').replace(/\D/g, '');
+    if (digits.startsWith('51') && digits.length === 11) digits = digits.slice(2);
+    return digits;
+}
+
+function isAccessLogEnabled() {
+    return process.env.ACCESS_LOG_ENABLED === 'true';
+}
+
+function isAccessLogTestPhone(phone: string) {
+    const rawList = String(process.env.ACCESS_LOG_TEST_PHONES || '').split(',').map((t) => t.trim()).filter(Boolean);
+    if (rawList.length === 0) return true;
+    const target = normalizePhoneDigits(phone);
+    return rawList.some((t) => normalizePhoneDigits(t) === target);
+}
+
+function mentionsAccessIntent(text: string) {
+    const normalized = normalizeText(text);
+    if (normalized.length < 6) return false;
+    const positive = [
+        /\bllegue al gym\b/, /\bllegue al gimnasio\b/, /\bya llegue\b/, /\bya llegue al\b/,
+        /\bquiero ingresar\b/, /\bquiero entrar\b/, /\bvoy a entrar\b/, /\bvoy a ingresar\b/,
+        /\bestoy entrando\b/, /\bestoy en la puerta\b/, /\ben la puerta\b/,
+        /\bregistra mi ingreso\b/, /\bregistrame mi ingreso\b/, /\bregistrame el ingreso\b/, /\bregistra mi asistencia\b/,
+        /\bmarca mi asistencia\b/, /\bmarcar asistencia\b/, /\bmarca mi ingreso\b/, /\bmarcar ingreso\b/,
+        /\bregistrar ingreso\b/, /\bregistrar asistencia\b/
+    ];
+    if (!positive.some((pattern) => pattern.test(normalized))) return false;
+    const negativeTokens = [
+        'pagar', 'pago', 'deuda', 'rutina', 'menu', 'abren', 'horario', 'clase', 'reservar',
+        'voz', 'cuota', 'renovar', 'membresia', 'cuanto', 'donde', 'que hora', 'precio', 'link', 'voucher'
+    ];
+    if (negativeTokens.some((token) => normalized.includes(token))) return false;
+    return true;
+}
 export async function executeTool(name: string, args: any) {
     const adminInner = require('firebase-admin');
     if (!adminInner.apps.length) adminInner.initializeApp();
@@ -663,11 +700,98 @@ export async function executeTool(name: string, args: any) {
                 return { error: e.message };
             }
 
-        case 'check_member_status':
-            const membersSnap = await findMember(dbInner, args.phone);
-            if (!membersSnap) return { status: 'not_found' };
-            const member = membersSnap.docs[0].data();
-            return member;
+        case 'register_access_log':
+            try {
+                const phone = String(args.phone || '').trim();
+                const intentText = String(args.intentText || '').trim();
+                if (!phone) return { error: 'missing_phone' };
+
+                const memberSnap = await findMember(dbInner, phone);
+                const memberData = memberSnap && !memberSnap.empty ? memberSnap.docs[0].data() : null;
+                const memberId = memberSnap && !memberSnap.empty ? memberSnap.docs[0].id : null;
+
+                let statusAtAccess = 'unknown';
+                let allowed = false;
+                let reason = 'member_not_found';
+
+                if (memberData) {
+                    let daysOverdue: number | null = null;
+                    if (memberData.endDate) {
+                        const end = new Date(memberData.endDate);
+                        const today = new Date();
+                        today.setHours(0, 0, 0, 0);
+                        daysOverdue = Math.max(0, Math.floor((today.getTime() - end.getTime()) / (1000 * 60 * 60 * 24)));
+                    }
+                    const memberStatus = String(memberData.status || '');
+                    if (memberStatus === 'inactive' || memberStatus === 'expired') {
+                        statusAtAccess = 'inactive';
+                        reason = 'inactive_member';
+                    } else if (daysOverdue === null || daysOverdue <= 0) {
+                        statusAtAccess = 'active';
+                        allowed = true;
+                        reason = 'active_member';
+                    } else if (daysOverdue <= 3) {
+                        statusAtAccess = 'overdue';
+                        allowed = true;
+                        reason = 'overdue_grace_period';
+                    } else {
+                        statusAtAccess = 'overdue';
+                        reason = 'overdue_restricted';
+                    }
+                }
+
+                const now = new Date();
+                // Evitar duplicados: no registrar dos ingresos del mismo numero dentro de 10 minutos.
+                let duplicate = false;
+                try {
+                    const recent = await dbInner.collection('accessLogs')
+                        .where('phone', '==', phone)
+                        .orderBy('createdAt', 'desc')
+                        .limit(1)
+                        .get();
+                    const last = recent.docs[0]?.data();
+                    if (last?.createdAt?.toDate) {
+                        const lastDate = last.createdAt.toDate();
+                        if ((now.getTime() - lastDate.getTime()) < 10 * 60 * 1000) duplicate = true;
+                    }
+                } catch (e: any) {
+                    console.error('register_access_log: error revisando duplicados', e?.message);
+                }
+
+                if (duplicate) {
+                    return { duplicate: true, allowed, reason, memberName: memberData?.name || null };
+                }
+
+                const formatter = new Intl.DateTimeFormat('en-CA', {
+                    timeZone: 'America/Lima', year: 'numeric', month: '2-digit', day: '2-digit'
+                });
+                const timeFormatter = new Intl.DateTimeFormat('en-GB', {
+                    timeZone: 'America/Lima', hour: '2-digit', minute: '2-digit', hour12: false
+                });
+                const parts = formatter.formatToParts(now);
+                const localDate = `${parts.find((p: any) => p.type === 'year')?.value}-${parts.find((p: any) => p.type === 'month')?.value}-${parts.find((p: any) => p.type === 'day')?.value}`;
+                const localTime = timeFormatter.format(now);
+
+                await dbInner.collection('accessLogs').add({
+                    memberId: memberId || null,
+                    memberName: memberData?.name || null,
+                    phone,
+                    source: 'whatsapp',
+                    intentText,
+                    statusAtAccess,
+                    allowed,
+                    reason,
+                    createdAt: adminInner.firestore.Timestamp.fromDate(now),
+                    localDate,
+                    localTime,
+                    testMode: true
+                });
+
+                return { allowed, reason, memberName: memberData?.name || null, memberStatus: statusAtAccess, testMode: true };
+            } catch (e: any) {
+                console.error('register_access_log error:', e?.message);
+                return { error: e.message };
+            }
 
         case 'book_class':
             try {
@@ -1304,6 +1428,29 @@ export async function processMessage(db: any, phone: string, messageText: string
         return `Perfecto${clientFirstName ? ` ${clientFirstName}` : ''} 😊 Lo tomo en cuenta. Te recuerdo en unos días para que puedas regularizar tu membresía con calma.`;
     }
 
+    // ---- Acceso por WhatsApp (Fase 2A): apagado por defecto ----
+    if (isAccessLogEnabled() && isAccessLogTestPhone(phone) && mentionsAccessIntent(messageText)) {
+        const accessResult = await executeTool('register_access_log', { phone, intentText: messageText });
+        if (accessResult?.duplicate) {
+            return `Listo${clientFirstName ? ` ${clientFirstName}` : ''}, tu ingreso ya quedo registrado hace un momento. Dale con todo.`;
+        }
+        if (accessResult?.error) {
+            return 'Estoy teniendo un problema para registrar tu ingreso. Intenta nuevamente en un instante, por favor.';
+        }
+        if (accessResult?.allowed) {
+            if (accessResult.reason === 'overdue_grace_period') {
+                return `Listo${clientFirstName ? ` ${clientFirstName}` : ''}, registre tu ingreso. Ve entrenando tranquilo y luego regularizamos tu membresia.`;
+            }
+            return `Listo${clientFirstName ? ` ${clientFirstName}` : ''}, registre tu ingreso de hoy. Dale con todo.`;
+        }
+        if (accessResult.reason === 'member_not_found') {
+            return 'No encuentro tu numero registrado todavia. Escribeme tu nombre o consulta en recepcion para ayudarte.';
+        }
+        if (accessResult.reason === 'inactive_member') {
+            return 'Te ayudo. Para registrar tu ingreso necesitamos activar tu membresia primero.';
+        }
+        return 'Te ayudo al toque. Primero revisemos tu membresia para dejar todo en orden.';
+    }
     const historySnapshot = await db.collection('messages')
         .where('phone', '==', phone)
         .orderBy('timestamp', 'asc')
