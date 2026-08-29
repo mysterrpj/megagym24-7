@@ -1,5 +1,5 @@
 import { NavLink, useNavigate } from 'react-router-dom';
-import { MessageSquare, Users, CreditCard, Calendar, Settings, LayoutDashboard, LogOut } from 'lucide-react';
+import { MessageSquare, Users, CreditCard, Calendar, Settings, LayoutDashboard, LogOut, DoorOpen } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { signOut } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
@@ -11,6 +11,7 @@ const sidebarItems = [
     { icon: CreditCard, label: 'Membresías', href: '/dashboard/memberships' },
     { icon: Calendar, label: 'Clases', href: '/dashboard/classes' },
     { icon: LayoutDashboard, label: 'Pagos', href: '/dashboard/payments' },
+    { icon: DoorOpen, label: 'Accesos', href: '/dashboard/access' },
     { icon: Settings, label: 'Configuración', href: '/dashboard/settings' },
 ];
 

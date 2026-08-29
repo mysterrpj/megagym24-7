@@ -9,6 +9,7 @@ import { PaymentsPage } from '@/pages/dashboard/PaymentsPage';
 import { SettingsPage } from '@/pages/dashboard/SettingsPage';
 import { ClassesPage } from '@/pages/dashboard/ClassesPage';
 import { MembershipsPage } from '@/pages/dashboard/MembershipsPage';
+import { AccessPage } from '@/pages/dashboard/AccessPage';
 
 
 
@@ -41,6 +42,7 @@ function App() {
                         <Route path="memberships" element={<MembershipsPage />} />
                         <Route path="classes" element={<ClassesPage />} />
                         <Route path="payments" element={<PaymentsPage />} />
+                        <Route path="access" element={<AccessPage />} />
                         <Route path="settings" element={<SettingsPage />} />
                     </Route>
                 </Route>
