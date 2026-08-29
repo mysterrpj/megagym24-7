@@ -1,6 +1,6 @@
 # Plan Sofia Proactiva - Estado Actual
 
-Fecha de referencia: 2026-04-21.
+Fecha de referencia: 2026-08-29.
 
 Este documento resume el estado actual de Sofia como asistente automatico de MegaGym. La fuente principal de verdad sigue siendo `CONTEXTO_PROYECTO.md`.
 
@@ -33,6 +33,12 @@ Por eso, la pantalla `Mensajes` queda minimalista:
 - Seguimiento ligero de entrenamiento dentro de `trainingProfile`.
 - Seguimiento nutricional ligero dentro de `trainingProfile`.
 - Dashboard de mensajes como historial limpio.
+- Menu rapido interactivo por WhatsApp via Twilio Content API.
+- Opciones rapidas actuales: renovar membresia, reservar FULLBODY, hablar por voz y ver rutina.
+- Palabras que muestran el menu: `menu`, `menú`, `opciones`, `ver opciones`, `mostrar menú`.
+- Aviso discreto cada 24 horas o primer contacto: `💡 Si quieres ver opciones rápidas, escribe *menu*.`
+- Memoria compartida entre chat de texto y voz mediante `assistantMemory`.
+- Selector de voz del panel conservado con tres proveedores: `agora`, `gemini`, `gpt-realtime-mini`.
 
 ## Reglas actuales importantes
 
@@ -42,6 +48,10 @@ Por eso, la pantalla `Mensajes` queda minimalista:
 - La memoria del cliente se obtiene poco a poco en conversacion; Sofia no debe convertirlo en formulario.
 - Si el cliente habla de su rutina, cumplimiento, ejercicio dificil, progreso, dolor o faltas, Sofia puede guardar esa senal para explicar mejor y acompanar.
 - Si el cliente habla de dieta, antojos, ansiedad, comidas que se salta o dificultad para cumplir, Sofia puede guardar esa senal y usarla para responder mejor.
+- El chat y la voz deben sentirse como una sola Sofia. No separar memoria ni personalidad entre canales.
+- No cambiar ni eliminar el selector de proveedor de voz del panel sin aprobacion explicita.
+- No acortar enlaces inventando URLs. Los links reales se envian en su propia linea.
+- El menu rapido es opcional: si el cliente no escribe `menu`, puede seguir conversando normalmente con Sofia.
 - No implementar envio manual desde `Mensajes` salvo decision explicita futura.
 - No convertir `Mensajes` en CRM completo si el propietario no lo va a usar.
 
@@ -53,6 +63,7 @@ Por eso, la pantalla `Mensajes` queda minimalista:
 - Profundizar memoria de cliente para progreso y riesgo de abandono.
 - Optimizar costos de IA con seleccion inteligente de modelo: usar `gpt-4o` para pagos, deuda, voucher, membresias y casos criticos; usar `gpt-4o-mini` para saludos, rutina/dieta por link, dudas simples, preguntas personales y conversaciones largas. Si se quiere volver rapido a `gpt-4o` para todo, configurar `OPENAI_DEFAULT_CHAT_MODEL=gpt-4o` y redesplegar funciones.
 - Migrar configuracion de `functions.config()` a parametros antes de marzo 2027.
+- Planificar migracion de runtime `Node.js 20` antes de que Firebase lo retire.
 
 ## Pendiente futuro - Nutricion
 

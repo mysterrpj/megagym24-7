@@ -315,6 +315,192 @@ async function applyDebtPayment(db: any, adminInner: any, phone: string, payment
     };
 }
 
+
+const WHATSAPP_MENU_FROM = 'whatsapp:+51907935299';
+const WHATSAPP_MENU_HINT_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const WHATSAPP_MENU_HINT = '\uD83D\uDCA1 Si quieres ver opciones r\u00e1pidas, escribe *menu*.';
+const WHATSAPP_MENU_FALLBACK = [
+    '\u00a1Claro! \uD83D\uDE0A Estas son tus opciones:',
+    '',
+    '\u2022 Renovar membres\u00eda',
+    '\u2022 Reservar FULLBODY',
+    '\u2022 Hablar por voz',
+    '\u2022 Ver mi rutina',
+    '',
+    'Escribe la opci\u00f3n que deseas y Sof\u00eda te ayudar\u00e1 al toque \uD83D\uDCAA'
+].join('\n');
+
+const WHATSAPP_MENU_INTENTS: Record<string, string> = {
+    renew_membership: 'Quiero renovar mi membres\u00eda',
+    'renovar membresia': 'Quiero renovar mi membres\u00eda',
+    book_fullbody: 'Quiero reservar una clase FULLBODY',
+    'reservar fullbody': 'Quiero reservar una clase FULLBODY',
+    voice_session: 'Quiero hablar por voz contigo',
+    'hablar por voz': 'Quiero hablar por voz contigo',
+    view_routine: 'Quiero ver mi rutina',
+    'ver mi rutina': 'Quiero ver mi rutina'
+};
+
+let whatsappMenuContentSidPromise: Promise<string> | null = null;
+
+function normalizeWhatsAppMenuText(value: any) {
+    return String(value || '')
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9\s_]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function isWhatsAppMenuRequest(message: string) {
+    const normalized = normalizeWhatsAppMenuText(message);
+    return ['menu', 'opciones', 'ver opciones', 'mostrar menu'].includes(normalized);
+}
+
+async function shouldShowWhatsAppMenuHint(db: any, phone: string) {
+    const latestMessage = await db.collection('messages')
+        .where('phone', '==', phone)
+        .orderBy('timestamp', 'desc')
+        .limit(1)
+        .get();
+
+    if (latestMessage.empty) return true;
+
+    const lastTimestamp = latestMessage.docs[0].data()?.timestamp;
+    const lastMessageDate = lastTimestamp?.toDate?.();
+    if (!(lastMessageDate instanceof Date)) return false;
+
+    return Date.now() - lastMessageDate.getTime() >= WHATSAPP_MENU_HINT_INTERVAL_MS;
+}
+
+function resolveWhatsAppMenuIntent(requestBody: any) {
+    const candidates = [
+        requestBody?.ButtonPayload,
+        requestBody?.ButtonText,
+        requestBody?.Body
+    ];
+
+    if (requestBody?.InteractiveData) {
+        try {
+            const interactiveData = JSON.parse(String(requestBody.InteractiveData));
+            candidates.push(
+                interactiveData?.id,
+                interactiveData?.title,
+                interactiveData?.list_reply?.id,
+                interactiveData?.list_reply?.title
+            );
+        } catch (error) {
+            console.warn('WhatsApp menu: InteractiveData is not valid JSON.');
+        }
+    }
+
+    for (const candidate of candidates) {
+        const key = normalizeWhatsAppMenuText(candidate);
+        if (key && WHATSAPP_MENU_INTENTS[key]) {
+            return WHATSAPP_MENU_INTENTS[key];
+        }
+    }
+
+    return '';
+}
+
+async function createWhatsAppMenuContent(accountSid: string, authToken: string) {
+    const axios = require('axios');
+    const response = await axios.post(
+        'https://content.twilio.com/v1/Content',
+        {
+            friendly_name: 'megagym_sofia_menu',
+            language: 'es',
+            types: {
+                'twilio/text': {
+                    body: WHATSAPP_MENU_FALLBACK
+                },
+                'twilio/list-picker': {
+                    body: '\u00a1Aqu\u00ed estoy! \uD83D\uDE0A Elige qu\u00e9 quieres hacer y te ayudo al toque:',
+                    button: 'Ver opciones',
+                    items: [
+                        {
+                            id: 'renew_membership',
+                            item: 'Renovar membres\u00eda',
+                            description: 'Recibe tu enlace seguro de pago'
+                        },
+                        {
+                            id: 'book_fullbody',
+                            item: 'Reservar FULLBODY',
+                            description: 'Elige entre 8:30 AM y 8:00 PM'
+                        },
+                        {
+                            id: 'voice_session',
+                            item: 'Hablar por voz',
+                            description: 'Conversa por voz con Sof\u00eda'
+                        },
+                        {
+                            id: 'view_routine',
+                            item: 'Ver mi rutina',
+                            description: 'Consulta tu entrenamiento personalizado'
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            auth: { username: accountSid, password: authToken },
+            headers: { 'Content-Type': 'application/json' }
+        }
+    );
+
+    const contentSid = String(response.data?.sid || '');
+    if (!contentSid.startsWith('HX')) {
+        throw new Error('Twilio did not return a valid Content SID for the menu.');
+    }
+    return contentSid;
+}
+
+async function getWhatsAppMenuContentSid(db: any, accountSid: string, authToken: string) {
+    const configuredSid = String(process.env.TWILIO_WHATSAPP_MENU_CONTENT_SID || '').trim();
+    if (configuredSid) return configuredSid;
+
+    if (!whatsappMenuContentSidPromise) {
+        whatsappMenuContentSidPromise = (async () => {
+            const settingsRef = db.collection('settings').doc('whatsappMenu');
+            const settingsDoc = await settingsRef.get();
+            const savedSid = String(settingsDoc.data()?.contentSid || '').trim();
+            if (savedSid) return savedSid;
+
+            const contentSid = await createWhatsAppMenuContent(accountSid, authToken);
+            await settingsRef.set({
+                contentSid,
+                friendlyName: 'megagym_sofia_menu',
+                updatedAt: admin.firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+            return contentSid;
+        })().catch((error) => {
+            whatsappMenuContentSidPromise = null;
+            throw error;
+        });
+    }
+
+    return whatsappMenuContentSidPromise;
+}
+
+async function sendWhatsAppMenu(db: any, phone: string) {
+    const accountSid = String(process.env.TWILIO_ACCOUNT_SID || '');
+    const authToken = String(process.env.TWILIO_AUTH_TOKEN || '');
+    if (!accountSid || !authToken) {
+        throw new Error('Missing Twilio credentials for the WhatsApp menu.');
+    }
+
+    const twilioClient = require('twilio')(accountSid, authToken);
+    const contentSid = await getWhatsAppMenuContentSid(db, accountSid, authToken);
+    await twilioClient.messages.create({
+        from: WHATSAPP_MENU_FROM,
+        to: 'whatsapp:' + phone,
+        contentSid
+    });
+}
+
+
 export const twilioWebhookWhatsapp = functions
     .runWith({ memory: '1GB', timeoutSeconds: 120 })
     .https.onRequest(async (req, res) => {
@@ -325,6 +511,11 @@ export const twilioWebhookWhatsapp = functions
         let incomingMsg = req.body.Body || '';
         const from = req.body.From;
         const phone = from.replace('whatsapp:', '');
+
+        const menuIntent = resolveWhatsAppMenuIntent(req.body);
+        if (menuIntent) {
+            incomingMsg = menuIntent;
+        }
 
         const mediaUrl = req.body.MediaUrl0;
         const mediaType = req.body.MediaContentType0;
@@ -344,15 +535,47 @@ export const twilioWebhookWhatsapp = functions
         console.log(`Msg from ${phone}: ${incomingMsg || '[Sin texto/Media]'}`);
 
         try {
+            const isMenuRequest = isWhatsAppMenuRequest(incomingMsg);
+            const shouldShowMenuHint = !isMenuRequest && await shouldShowWhatsAppMenuHint(db, phone);
+
             await db.collection('messages').add({
                 phone,
                 content: incomingMsg,
                 direction: 'inbound',
                 timestamp: adminInner.firestore.FieldValue.serverTimestamp()
             });
+            if (isMenuRequest) {
+                try {
+                    await sendWhatsAppMenu(db, phone);
+                    await db.collection('messages').add({
+                        phone,
+                        content: '[Menu interactivo de Sofia]',
+                        direction: 'outbound',
+                        timestamp: adminInner.firestore.FieldValue.serverTimestamp(),
+                        source: 'whatsapp_interactive_menu'
+                    });
+                    res.type('text/xml').send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+                    return;
+                } catch (menuError: any) {
+                    console.error('WhatsApp menu: interactive list could not be sent.', menuError?.message || menuError);
+                    await db.collection('messages').add({
+                        phone,
+                        content: WHATSAPP_MENU_FALLBACK,
+                        direction: 'outbound',
+                        timestamp: adminInner.firestore.FieldValue.serverTimestamp(),
+                        source: 'whatsapp_menu_fallback'
+                    });
+                    const safeFallback = WHATSAPP_MENU_FALLBACK.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                    res.type('text/xml').send('<?xml version="1.0" encoding="UTF-8"?><Response><Message>' + safeFallback + '</Message></Response>');
+                    return;
+                }
+            }
 
             const bot = require('./bot/messageProcessor');
-            const replyText = await bot.processMessage(db, phone, incomingMsg);
+            const botReply = await bot.processMessage(db, phone, incomingMsg);
+            const replyText = shouldShowMenuHint
+                ? botReply + '\n\n' + WHATSAPP_MENU_HINT
+                : botReply;
 
             await db.collection('messages').add({
                 phone,

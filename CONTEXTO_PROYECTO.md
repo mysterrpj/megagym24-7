@@ -231,6 +231,87 @@ nativo), tool `generar_link_voz` y Cloud Function `getVoiceContext` (en `index.t
 
 ---
 
+## Actualizacion Operativa (2026-08-29) - Sofia WhatsApp, voz y menu rapido
+
+Esta seccion refleja el estado desplegado del bot de WhatsApp al 2026-08-29.
+
+### Memoria compartida entre chat y voz
+
+- El chat de WhatsApp y la experiencia por voz deben sentirse como una sola Sofia, no como dos agentes separados.
+- La voz guarda un resumen util de cada sesion en `members.assistantMemory` mediante `saveVoiceSessionMemory`.
+- `getVoiceContext` entrega a la voz la memoria existente del cliente: `ultimaInteraccionClave`, `ultimaInteraccionTexto`, `resumenConversacional`, `ultimaSesionVozResumen` y `ultimoCanal`.
+- `messageProcessor.ts` usa esa memoria tambien en el chat de texto, para que Sofia pueda continuar conversaciones previas por voz o por chat.
+- Mantener intacto el selector del panel admin para voz: `agora`, `gemini` y `gpt-realtime-mini`. No eliminar ni reemplazar esas opciones sin decision explicita del usuario.
+
+### Selector de proveedor de voz
+
+Desde el panel de `Configuracion`, el administrador puede elegir:
+
+- `Agora + Gemini`
+- `Gemini Live`
+- `GPT-Realtime mini`
+
+El cambio es inmediato para llamadas nuevas. La app debe conservar estas tres rutas porque sirven para comparar calidad/costo y para tener fallback operativo.
+
+### Menu rapido de WhatsApp
+
+Sofia tiene un menu interactivo de WhatsApp enviado por Twilio Content API.
+
+El menu aparece cuando el cliente escribe:
+
+- `menu`
+- `menú`
+- `opciones`
+- `ver opciones`
+- `mostrar menú`
+
+Opciones actuales:
+
+- `Renovar membresia`
+- `Reservar FULLBODY`
+- `Hablar por voz`
+- `Ver mi rutina`
+
+Si WhatsApp/Twilio no renderiza la lista interactiva, se usa texto fallback con las mismas opciones. Las respuestas seleccionadas se convierten en intenciones normales para que las procese Sofia, por ejemplo `Quiero renovar mi membresia` o `Quiero ver mi rutina`.
+
+### Aviso discreto para descubrir el menu
+
+Para que el cliente sepa que existe el menu sin tener que explicarselo manualmente, el webhook agrega este aviso al final de una respuesta normal:
+
+`💡 Si quieres ver opciones rápidas, escribe *menu*.`
+
+Reglas:
+
+- aparece en el primer contacto o cuando pasaron al menos 24 horas desde el ultimo mensaje guardado del cliente;
+- no aparece si el cliente acaba de escribir `menu`/`opciones`;
+- no se repite dentro de una conversacion activa;
+- no cambia el comportamiento normal de Sofia.
+
+### Estilo actual de Sofia por chat
+
+El chat debe acercarse al trato de Sofia por voz:
+
+- respuestas cortas, naturales y calidas;
+- 1 a 3 emojis utiles, sin saturar;
+- enlaces en su propia linea;
+- sin inventar ni acortar enlaces;
+- rutina con mensaje limpio: titulo, enlace directo y una invitacion breve a preguntar por un ejercicio;
+- al generar links de pago o reservas, explicar en una frase que el pago queda registrado cuando Culqi confirma.
+
+### Produccion
+
+- Funcion desplegada: `twilioWebhookWhatsapp`
+- URL webhook WhatsApp: `https://us-central1-fit-ia-megagym.cloudfunctions.net/twilioWebhookWhatsapp`
+- Ultima version desplegada conocida: `123`
+- Fecha de despliegue: `2026-08-29`
+
+Notas de infraestructura vistas durante deploy:
+
+- `Node.js 20` aparece como runtime con fecha de deprecacion; planificar migracion antes de que Firebase lo retire.
+- `functions.config()` / Runtime Config debe migrarse a parametros antes de marzo 2027.
+
+---
+
 ## Documentos Archivados
 
 Los siguientes archivos son documentación histórica del proyecto, ya completada. No reflejan el estado actual:

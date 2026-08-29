@@ -31,6 +31,8 @@ URL actual:
 - Módulo de clases conectado a Firestore
 - Reserva pagada de clases grupales por WhatsApp
 - Memoria progresiva y personalización del bot por cliente
+- Menu rapido interactivo de WhatsApp: renovar membresia, reservar FULLBODY, hablar por voz y ver rutina
+- Aviso discreto para descubrir el menu: `Si quieres ver opciones rapidas, escribe *menu*`
 
 ## Módulo de clases
 
@@ -65,6 +67,15 @@ Sofía ya empezó a guardar memoria útil del cliente de forma progresiva en `me
   - `ultimaInteraccionTexto`
 
 La idea es que no pregunte todo de golpe, sino que complete el perfil poco a poco mientras conversa.
+
+Desde 2026-08-29, la memoria de Sofia se comparte entre chat y voz. La voz guarda resumenes utiles en `assistantMemory`, y el chat los usa para continuar la conversacion como una sola Sofia.
+
+## WhatsApp y voz
+
+- El webhook principal sigue siendo `twilioWebhookWhatsapp`.
+- El menu rapido se activa con `menu`, `menú`, `opciones`, `ver opciones` o `mostrar menú`.
+- El selector de voz del panel debe conservar las tres opciones: `agora`, `gemini` y `gpt-realtime-mini`.
+- El chat mantiene el estilo cercano de Sofia por voz: mensajes breves, naturales, con pocos emojis y enlaces claros.
 
 Pendiente:
 

@@ -1406,7 +1406,7 @@ export async function processMessage(db: any, phone: string, messageText: string
 
             if (paymentLink?.url) {
                 const scheduleLabel = formatClassTimeLabel(String(selectedClass.time || ''));
-                return `Listo${clientFirstName ? ` ${clientFirstName}` : ''}. Aqui tienes tu link para reservar ${selectedClass.name} con LIZ PIA a las ${scheduleLabel}. Son S/ 6 y puedes pagar por Yape o tarjeta en Culqi: ${paymentLink.url}`;
+                return `¡De una${clientFirstName ? `, ${clientFirstName}` : ''}! 🙌 Tu cupo para ${selectedClass.name} con LIZ PIA a las ${scheduleLabel} queda confirmado apenas Culqi apruebe los S/ 6. Puedes pagar con Yape o tarjeta 👇\n\n${paymentLink.url}\n\n¡Nos vemos entrenando! 💪`;
                 return `¡Perfecto${clientFirstName ? ` ${clientFirstName}` : ''}! 🙌 Aquí tienes tu link para reservar ${selectedClass.name} con LIZ PIA a las ${selectedClass.time}. Son S/ 6 y puedes pagar por Yape o tarjeta en Culqi 👇 ${paymentLink.url}`;
             }
 
@@ -1431,11 +1431,11 @@ export async function processMessage(db: any, phone: string, messageText: string
     const systemPrompt = `Eres Sofía, la asistente personal y trainer virtual de MegaGym ("La casa del dolor" 📍). Tienes una personalidad vibrante, cálida y auténtica — hablas como una amiga peruana de confianza que además sabe mucho de fitness. No eres un robot ni un asistente frío, eres alguien cercana que se alegra genuinamente por los logros del cliente y que también sabe cuándo ser seria.
 
     TU PERSONALIDAD:
-    - Usas expresiones peruanas naturales cuando encajan: "¡De una!", "¡Qué crack!", "¡Así se hace!", "¡No te rajes!", "¡Eso es!", "¡Jalaaa!", "bacán", "al toque".
-    - Reaccionas emocionalmente según el contexto: si el cliente dice que entrenó duro, te emocionas y lo celebras. Si dice que está cansado, lo animas con energía. Si hace una pregunta curiosa, respondes con entusiasmo.
-    - Varía tus emojis según la situación — no uses siempre los mismos. Ejemplos: logro → 🏆🙌🎉, esfuerzo → 💪🔥😤, comida → 🍗🥑🍳, motivación → ⚡🚀😎, cariño → 😊❤️, urgencia → 🚨⚠️.
-    - A veces puedes hacer una broma corta o comentario gracioso si el momento lo permite, pero sin exagerar.
-    - Si el cliente comparte algo personal (logro, problema, meta), reconócelo antes de responder la pregunta. Ejemplo: si dice "bajé 3 kilos", primero celebra eso con energía antes de dar cualquier consejo.
+    - Hablas como Sofia por voz: cercana, agil y realmente atenta a lo que la persona acaba de decir. Suenas a una buena conversacion, no a un texto preparado.
+    - Usas expresiones peruanas naturales cuando encajan: De una, Que crack, Asi se hace, No te rajes, Eso es, Jalaaa, bacan, al toque. No las fuerces ni las repitas en cada mensaje.
+    - Primero reaccionas a la emocion o intencion del cliente y luego ayudas. Si entreno duro, celebras; si esta cansado, lo animas; si tiene una duda, le respondes con curiosidad y claridad.
+    - Usas de 1 a 3 emojis que aporten al mensaje y los varias segun el momento: logro, esfuerzo, comida, motivacion, carino o urgencia.
+    - Puedes hacer una broma corta o comentario gracioso cuando nazca naturalmente. Si el cliente comparte un logro, problema o meta, reconocelo antes de dar el consejo.
 
     INFORMACIÓN CRÍTICA DEL GIMNASIO (Tu Biblia):
     - Dirección: Mz I Lt 5 Montenegro, San Juan de Lurigancho.
@@ -1497,11 +1497,12 @@ export async function processMessage(db: any, phone: string, messageText: string
        e) Entrega las porciones de forma interactiva y con emojis de alimentos (🍗🥑🍳🥩).
     14. ASESORÍA POR VOZ: Cuando un miembro te pida hablar por voz, una asesoría hablada o conversar/entrenar por voz contigo, usa 'generar_link_voz' con su teléfono y envíale con entusiasmo el enlace que devuelve para que hable por voz conmigo. Al enviar el enlace, dile con naturalidad que para que el micrófono funcione bien lo abra en su navegador (Chrome o Safari). Si el resultado indica que no es elegible (membresía vencida o inactiva), acompáñalo con calidez e invítalo a renovar, contándole que en cuanto active su membresía podrá usar la asesoría por voz.
     13. ESTILO DE RESPUESTA - REGLAS DE ORO:
-       - SIEMPRE responde como si fueras una amiga mandando un WhatsApp, no como un blog ni un manual.
-       - NUNCA uses negritas (*texto*) para subtítulos ni títulos dentro de la respuesta. Las negritas solo están permitidas para resaltar UNA palabra clave importante, no para crear estructura tipo artículo.
-       - NUNCA uses listas numeradas. Si necesitas listar cosas, usa máximo 3 ítems con emojis como viñetas.
-       - Para preguntas técnicas de entrenamiento (técnica, ejercicios, conceptos de fitness, nutrición): responde en máximo 2-3 oraciones con lo esencial. Siempre termina ofreciendo profundizar: "¿Quieres saber [opción A] o [opción B]? 🔥" en lugar de soltar todo de golpe.
-       - Para el resto de mensajes: máx 3 oraciones, emojis (💪, 😊, 🔥) y termina con una pregunta motivadora.${profileQuestionInstruction}`;
+       - Escribe como una amiga enviando un WhatsApp: una idea clara por mensaje, frases cortas y naturales. Evita sonar como blog, manual o atencion al cliente.
+       - Empieza conectando con lo que dijo la persona cuando haya espacio para ello; despues da la respuesta o siguiente paso. No uses titulos ni bloques rigidos.
+       - Usa negrita solo para una palabra puntual si realmente ayuda. Si hace falta enumerar, usa hasta 3 vinetas con emojis, nunca listas numeradas.
+       - Para preguntas de entrenamiento, tecnica, nutricion o rutina: responde lo esencial en 2 o 3 oraciones y abre una continuacion simple, por ejemplo: Quieres que te explique la tecnica o como incluirlo en tu rutina?
+       - Para el resto: normalmente usa hasta 3 oraciones. Cierra con una pregunta solo cuando ayude a avanzar; si ya entregaste un link, una respuesta cerrada o una confirmacion, despidete con naturalidad en vez de forzar otra pregunta.
+       - Cuando compartas un enlace, presentalo con una frase calida, deja el enlace solo en su propia linea y explica en una frase que pasa al usarlo. No inventes ni acortes enlaces.${profileQuestionInstruction}`;
 
     const chatModel = selectChatModel(messageText);
     console.log(`Sofia chat model selected: ${chatModel}`);
@@ -1550,15 +1551,30 @@ export async function processMessage(db: any, phone: string, messageText: string
                 const resolvedPaymentType = functionResult.paymentType || toolArgs.paymentType;
                 if (resolvedPaymentType === 'class_booking') {
                     const scheduleLabel = formatClassTimeLabel(String(toolArgs.desiredTime || extractDesiredTime(String(toolArgs.planName || ''))));
-                    directToolReply = `Listo${clientFirstName ? ` ${clientFirstName}` : ''}. Aqui tienes tu link real para reservar tu clase grupal${scheduleLabel ? ` a las ${scheduleLabel}` : ''}. Son S/ 6 y puedes pagar por Yape o tarjeta en Culqi: ${functionResult.url}`;
+                    directToolReply = `¡De una${clientFirstName ? `, ${clientFirstName}` : ''}! 🙌 Te separo la clase grupal${scheduleLabel ? ` de las ${scheduleLabel}` : ''}. Tu cupo se confirma apenas Culqi apruebe los S/ 6; puedes pagar por Yape o tarjeta 👇\n\n${functionResult.url}\n\n¡A darle con todo! 💪`;
                 } else if (resolvedPaymentType === 'debt_payment') {
                     const debt = memberDoc && !memberDoc.empty ? Math.max(0, Number(memberDoc.docs[0].data().debt) || 0) : 0;
-                    directToolReply = `Listo${clientFirstName ? ` ${clientFirstName}` : ''}. Aqui tienes tu link real para pagar tu deuda${debt > 0 ? ` de S/ ${debt.toFixed(2)}` : ''}: ${functionResult.url}`;
+                    directToolReply = `¡Listo${clientFirstName ? `, ${clientFirstName}` : ''}! 😊 Aquí está tu enlace para dejar al día tu saldo${debt > 0 ? ` de S/ ${debt.toFixed(2)}` : ''} 👇\n\n${functionResult.url}\n\nApenas Culqi confirme el pago, quedará registrado.`;
                 } else {
-                    directToolReply = `Listo${clientFirstName ? ` ${clientFirstName}` : ''}. Aqui tienes tu link real de pago para la membresia: ${functionResult.url}`;
+                    directToolReply = `¡De una${clientFirstName ? `, ${clientFirstName}` : ''}! 🔥 Te dejo tu enlace para renovar la membresía y seguir con el ritmo 👇\n\n${functionResult.url}\n\nApenas Culqi confirme el pago, tu renovación quedará registrada. ¡No te rajes! 💪`;
                 }
             } else if (toolCall.function.name === 'send_payment_voucher' && functionResult?.voucher) {
                 directToolReply = functionResult.voucher;
+            } else if (toolCall.function.name === 'get_student_routine' && functionResult?.found) {
+                const routines = Array.isArray(functionResult.routines)
+                    ? functionResult.routines.filter((routine: any) => routine?.url)
+                    : [];
+                const latestRoutine = routines[0];
+
+                if (latestRoutine) {
+                    const routineTitle = String(latestRoutine.title || 'tu rutina personalizada').trim();
+                    directToolReply = `\u00a1Listo${clientFirstName ? `, ${clientFirstName}` : ''}! \ud83d\udcaa Tienes activa tu rutina *${routineTitle}*.
+
+M\u00edrala aqu\u00ed \ud83d\udc47
+${latestRoutine.url}
+
+Rev\u00edsala y dime qu\u00e9 ejercicio quieres que te explique.`;
+                }
             }
             toolMessages.push({
                 tool_call_id: toolCall.id,
