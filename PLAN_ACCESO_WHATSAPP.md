@@ -258,48 +258,55 @@ Mitigacion:
 
 ## Estado del plan
 
-Estado actual: plan tecnico preparado, pendiente de implementacion.
+Estado actual: FASE 2A IMPLEMENTADA Y DESPLEGADA (2026-08-29).
 
-Este archivo no significa que el acceso por WhatsApp ya este programado. Significa que ya existe una guia segura para implementarlo despues sin tocar produccion de forma riesgosa.
+- Codigo: deteccion conservadora `mentionsAccessIntent` + tool interna `register_access_log` + intercept determinista en `messageProcessor.ts`.
+- Modo prueba: `ACCESS_LOG_ENABLED=true` con `ACCESS_LOG_TEST_PHONES=+51951296572` (solo el propietario).
+- Registro: documentos en `accessLogs` con fecha/hora America/Lima, miembro, telefono, estado, permitido, motivo y modo prueba. Duplicados bloqueados por 10 minutos.
+- Panel: seccion "Accesos" en el admin (filtro por fecha, resumen del dia y detalle) desplegada.
+- Prueba confirmada con el numero del propietario: "ya llegue al gym" -> `active_member`, permitido.
+- Pendiente: terminar pruebas con el propietario (frases normales: menu, pagar, rutina, horarios) y, cuando el propietario lo apruebe, ACTIVACION GENERAL (quitar restriccion de numeros de prueba).
+
+Este archivo refleja el estado real: el acceso por WhatsApp YA esta programado, en modo prueba restringido al propietario, sin afectar a los demas clientes.
 
 ## Checklist de implementacion segura
 
 ### Etapa 0 - Preparacion
 
-- [ ] Confirmar que `CONTEXTO_PROYECTO.md` y `PLAN_SOFIA_PROACTIVA.md` fueron leidos.
-- [ ] Confirmar que el bot actual funciona antes de tocar codigo.
-- [ ] Confirmar numero de prueba del propietario.
-- [ ] Definir si el primer modo sera solo registro silencioso o respuesta visible de Sofia.
+- [x] Confirmar que `CONTEXTO_PROYECTO.md` y `PLAN_SOFIA_PROACTIVA.md` fueron leidos.
+- [x] Confirmar que el bot actual funciona antes de tocar codigo.
+- [x] Confirmar numero de prueba del propietario.
+- [x] Definir si el primer modo sera solo registro silencioso o respuesta visible de Sofia (respuesta visible).
 
 ### Etapa 1 - Codigo apagado por defecto
 
-- [ ] Agregar bandera `ACCESS_LOG_ENABLED=false`.
-- [ ] Agregar lista opcional `ACCESS_LOG_TEST_PHONES`.
-- [ ] Crear deteccion conservadora `mentionsAccessIntent`.
-- [ ] Crear tool interna `register_access_log`.
-- [ ] Asegurar que con la bandera apagada el bot responde igual que antes.
+- [x] Agregar bandera `ACCESS_LOG_ENABLED=false` (luego activada en modo prueba).
+- [x] Agregar lista opcional `ACCESS_LOG_TEST_PHONES`.
+- [x] Crear deteccion conservadora `mentionsAccessIntent`.
+- [x] Crear tool interna `register_access_log`.
+- [x] Asegurar que con la bandera apagada el bot responde igual que antes.
 
 ### Etapa 2 - Registro en Firestore
 
-- [ ] Crear documentos en `accessLogs` solo cuando corresponda.
-- [ ] Guardar telefono, miembro, estado, permitido/no permitido, motivo y hora Lima.
-- [ ] Evitar duplicados excesivos si el cliente manda muchos mensajes seguidos.
-- [ ] Registrar tambien intentos no permitidos para auditoria.
+- [x] Crear documentos en `accessLogs` solo cuando corresponda.
+- [x] Guardar telefono, miembro, estado, permitido/no permitido, motivo y hora Lima.
+- [x] Evitar duplicados excesivos si el cliente manda muchos mensajes seguidos (10 min).
+- [x] Registrar tambien intentos no permitidos para auditoria (numeros autorizados).
 
 ### Etapa 3 - Prueba solo con propietario
 
-- [ ] Desplegar con la funcion apagada.
-- [ ] Activar solo para el numero del propietario.
-- [ ] Probar frases de ingreso.
+- [x] Desplegar con la funcion apagada y luego en modo prueba.
+- [x] Activar solo para el numero del propietario.
+- [x] Probar frases de ingreso ("ya llegue al gym").
 - [ ] Probar frases normales: `menu`, `quiero pagar`, `quiero mi rutina`, `a que hora abren`.
 - [ ] Confirmar que pagos, rutina, menu y voz siguen funcionando.
 
 ### Etapa 4 - Panel admin minimo
 
-- [ ] Agregar vista simple de accesos o asistencia.
-- [ ] Mostrar fecha, hora, cliente, telefono, estado, permitido y motivo.
-- [ ] No crear reportes avanzados todavia.
-- [ ] No mezclar esta vista con CRM ni mensajes manuales.
+- [x] Agregar vista simple de accesos (seccion "Accesos").
+- [x] Mostrar fecha, hora, cliente, telefono, estado, permitido y motivo.
+- [x] No crear reportes avanzados todavia.
+- [x] No mezclar esta vista con CRM ni mensajes manuales.
 
 ### Etapa 5 - Piloto controlado
 
