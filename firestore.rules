@@ -53,5 +53,27 @@ service cloud.firestore {
     match /studentRoutineAssignments/{document} {
       allow read, write: if isAdmin();
     }
+
+    // App de rutinas (Robert): los links compartidos se pueden abrir sin login,
+    // pero listar la biblioteca y crear/editar/borrar solo con la cuenta admin.
+    match /sharedRoutines/{document} {
+      allow get: if true;
+      allow list: if isAdmin();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Colecciones que usa la app de rutinas para listar alumnas: solo admin.
+    match /clientes/{document} {
+      allow read, write: if isAdmin();
+    }
+    match /clients/{document} {
+      allow read, write: if isAdmin();
+    }
+    match /students/{document} {
+      allow read, write: if isAdmin();
+    }
+    match /alumnas/{document} {
+      allow read, write: if isAdmin();
+    }
   }
 }

@@ -739,4 +739,14 @@ git status
 git branch --show-current
 ```
 
-Fin del documento. Cualquier IA debe confirmar que leyó AI_CONTEXT.md y CONTEXTO_PROYECTO.md antes de trabajar.
+
+---
+
+## 19. Actualización 2026-08-31 — App de rutinas con inicio de sesión
+
+- Problema: la app de rutinas (rutinas-robert.web.app) usa el mismo proyecto Firebase, fit-ia-megagym, sin autenticación; las reglas endurecidas del 2026-08-29 le negaban leer y escribir rutinas.
+- Arreglo aplicado, Opción A:
+  - La app de rutinas ahora pide iniciar sesión con correo y contraseña, la misma cuenta admin del panel, antes de entrar al editor. Los links compartidos con ?id= siguen abiertos al público para las alumnas.
+  - firestore.rules: sharedRoutines permite get público para links compartidos, y list y escritura solo para admin; se agregaron reglas admin-only para clientes, clients, students y alumnas.
+- Archivos tocados: rutinas/App.tsx y firestore.rules.
+- Desplegado el 2026-08-31: hosting de rutinas-robert y reglas de Firestore.Fin del documento. Cualquier IA debe confirmar que leyó AI_CONTEXT.md y CONTEXTO_PROYECTO.md antes de trabajar.
