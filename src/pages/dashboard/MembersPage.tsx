@@ -169,11 +169,13 @@ function StatsCard({ title, value, color }: { title: string; value: number; colo
 function MemberModal({
     member, // If provided, we are in Edit mode
     onClose,
-    onSubmit
+    onSubmit,
+    onCancelFutureRenewal
 }: {
     member?: Member;
     onClose: () => void;
-    onSubmit: (data: any) => void
+    onSubmit: (data: any) => void;
+    onCancelFutureRenewal?: () => Promise<void>;
 }) {
     const [name, setName] = useState(member?.name || '');
     const [dni, setDni] = useState(member?.dni || '');
@@ -192,6 +194,7 @@ function MemberModal({
     const [notasTrainer, setNotasTrainer] = useState((member as any)?.trainingProfile?.notasTrainer || '');
     const [adminNotes, setAdminNotes] = useState(member?.adminNotes || '');
     const [diet, setDiet] = useState(member?.diet || '');
+    const [cancellingFutureRenewal, setCancellingFutureRenewal] = useState(false);
 
     // Payment fields
     const [planPrice, setPlanPrice] = useState(member?.planPrice?.toString() || '70');
@@ -227,6 +230,7 @@ function MemberModal({
         return formatLocalDateInput(d);
     });
     const [expirationEditedManually, setExpirationEditedManually] = useState(false);
+    const skipInitialExpirationCalculation = useRef(!!member);
 
     // Update expiration date if plan changes (only if not editing an existing member initially to avoid overwrite, 
     // BUT user asked for auto-calc. Let's make it recalculate on plan change).
@@ -246,6 +250,10 @@ function MemberModal({
 
     // Auto-update expiration date based on plan and current membership start date.
     useEffect(() => {
+        if (skipInitialExpirationCalculation.current) {
+            skipInitialExpirationCalculation.current = false;
+            return;
+        }
         if (expirationEditedManually) return;
         if (!membershipStartDate || membershipStartDate.length < 10) return;
         const baseDate = parseLocalDateInput(membershipStartDate);
@@ -291,6 +299,21 @@ function MemberModal({
             trainingProfile: objetivo ? { objetivo, nivel, diasSemana: parseInt(diasSemana) || 0, limitaciones, notasTrainer } : null
         });
         onClose();
+    };
+
+    const handleCancelFutureRenewal = async () => {
+        if (!onCancelFutureRenewal) return;
+        if (!confirm('Cancelar la renovacion futura pendiente? La membresia actual y su deuda no cambiaran.')) return;
+
+        setCancellingFutureRenewal(true);
+        try {
+            await onCancelFutureRenewal();
+        } catch (error) {
+            console.error('Error cancelling future renewal:', error);
+            alert(error instanceof Error ? error.message : 'No se pudo cancelar la renovacion futura.');
+        } finally {
+            setCancellingFutureRenewal(false);
+        }
     };
 
     return (
@@ -498,6 +521,24 @@ function MemberModal({
                                 </div>
                             ))}
                         </div>
+                    </div>
+                )}
+
+                {member && Number(member.futureDebt || 0) > 0 && onCancelFutureRenewal && (
+                    <div className="border border-yellow-500/30 bg-yellow-500/10 rounded-lg p-3 space-y-2">
+                        <p className="text-xs text-yellow-300">
+                            Renovacion futura pendiente: S/ {Number(member.futureDebt || 0).toFixed(2)} desde {member.futureDebtStartDate || 'fecha no registrada'}.
+                        </p>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            onClick={handleCancelFutureRenewal}
+                            disabled={cancellingFutureRenewal}
+                            className="w-full border-red-500/40 text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                        >
+                            {cancellingFutureRenewal ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Trash className="w-4 h-4 mr-2" />}
+                            Cancelar renovacion futura
+                        </Button>
                     </div>
                 )}
 
@@ -773,6 +814,7 @@ function CashPaymentModal({
     const [amount, setAmount] = useState(debt > 0 ? debt.toString() : '');
     const [method, setMethod] = useState('efectivo');
     const [loading, setLoading] = useState(false);
+    const submittingRef = useRef(false);
 
     // Renewal fields
     const [isRenewing, setIsRenewing] = useState(needsRenewal && debt <= 0);
@@ -813,10 +855,12 @@ function CashPaymentModal({
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        if (submittingRef.current) return;
         const parsed = parseFloat(amount);
         if (isNaN(parsed) || parsed < 0) return;
         if (!isRenewing && parsed <= 0) return;
         if (debt > 0 && !isRenewing && parsed > debt) return;
+        submittingRef.current = true;
         setLoading(true);
         let renewalData = undefined;
         if (isRenewing) {
@@ -833,6 +877,7 @@ function CashPaymentModal({
             console.error("Error registering cash payment:", error);
             alert("No se pudo registrar el pago. Intenta nuevamente.");
         } finally {
+            submittingRef.current = false;
             setLoading(false);
         }
     };
@@ -1443,14 +1488,22 @@ export function MembersPage() {
         let updateData: Record<string, any>;
 
         if (renewalData) {
+            const existingFutureDebt = Math.max(0, Number(currentMemberData.futureDebt) || 0);
+            const existingFutureStart = parseLocalDateInput(currentMemberData.futureDebtStartDate);
+            const todayStart = new Date(today);
+            todayStart.setHours(0, 0, 0, 0);
+
+            if (existingFutureDebt > 0 && existingFutureStart && existingFutureStart > todayStart) {
+                alert(`Ya existe una renovacion futura pendiente de S/ ${existingFutureDebt.toFixed(2)} desde ${currentMemberData.futureDebtStartDate}. Cancelala o registra su pago antes de crear otra.`);
+                return;
+            }
+
             const newEndDate = new Date(renewalData.startDate);
             newEndDate.setDate(newEndDate.getDate() + getPlanDays(renewalData.plan));
 
             const startStr = formatLocalDateInput(renewalData.startDate);
             const endStr = formatLocalDateInput(newEndDate);
             const newDebt = Math.max(0, renewalData.planPrice - amount);
-            const todayStart = new Date(today);
-            todayStart.setHours(0, 0, 0, 0);
             const renewalStart = new Date(renewalData.startDate);
             renewalStart.setHours(0, 0, 0, 0);
             const isFutureRenewal = renewalStart > todayStart;
@@ -1628,7 +1681,13 @@ export function MembersPage() {
             } else if (modalMode === 'edit' && data.id) {
                 const memberRef = doc(db, 'members', data.id);
                 const memberSnap = await getDoc(memberRef);
-                const existingHistory = normalizeMembershipHistory(memberSnap.exists() ? memberSnap.data().membershipHistory : []);
+                const existingMemberData = memberSnap.exists() ? memberSnap.data() : {};
+                const existingHistory = normalizeMembershipHistory(existingMemberData.membershipHistory);
+                const isEditingFuturePeriod = Number(existingMemberData.futureDebt || 0) > 0
+                    && existingMemberData.futureDebtStartDate === membershipStartDateStr;
+                const persistedCurrentDebt = isEditingFuturePeriod
+                    ? Math.max(0, Number(existingMemberData.debt) || 0)
+                    : currentDebt;
                 const matchingIndex = existingHistory.findIndex((period) => period.startDate === membershipStartDateStr && period.endDate === data.expirationDateStr);
                 const nextHistory = existingHistory.length === 0
                     ? [currentMembershipPeriod]
@@ -1654,7 +1713,7 @@ export function MembersPage() {
                     status: data.status,
                     amountPaid: data.amountPaid,
                     planPrice: data.planPrice,
-                    debt: data.debt || 0,
+                    debt: persistedCurrentDebt,
                     expirationDate: expirationDateObj,
                     startDate: membershipStartDateStr,
                     endDate: data.expirationDateStr,
@@ -1671,6 +1730,66 @@ export function MembersPage() {
             console.error("Error saving member:", error);
             alert("Error al guardar el miembro.");
         }
+        setModalMode('none');
+        setSelectedMember(undefined);
+    };
+
+    const handleCancelFutureRenewal = async () => {
+        if (!selectedMember) return;
+
+        const memberRef = doc(db, 'members', selectedMember.id);
+        const memberSnap = await getDoc(memberRef);
+        if (!memberSnap.exists()) throw new Error('No se encontro el miembro. Actualiza la pagina e intenta nuevamente.');
+
+        const currentData = memberSnap.data();
+        const futureStart = String(currentData.futureDebtStartDate || '');
+        const history = normalizeMembershipHistory(currentData.membershipHistory);
+        const futurePeriods = history.filter((period) => period.status === 'future' || (!!futureStart && period.startDate === futureStart));
+        const receivedForFuturePeriod = futurePeriods.reduce((sum, period) => sum + Math.max(0, Number(period.amountPaid) || 0), 0);
+        const topLevelFuturePayment = currentData.startDate === futureStart
+            ? Math.max(0, Number(currentData.amountPaid) || 0)
+            : 0;
+
+        if (receivedForFuturePeriod > 0 || topLevelFuturePayment > 0) {
+            throw new Error('Esta renovacion futura tiene pagos registrados. Primero debe revisarse el pago.');
+        }
+
+        let nextHistory = history.filter((period) => period.status !== 'future' && (!futureStart || period.startDate !== futureStart));
+        const updateData: Record<string, any> = {
+            futureDebt: 0,
+            futureDebtStartDate: '',
+            futureDebtPlan: '',
+            futureDebtPlanPrice: 0,
+            membershipHistory: nextHistory,
+            updatedAt: serverTimestamp()
+        };
+
+        if (futureStart && currentData.startDate === futureStart) {
+            if (nextHistory.length === 0) {
+                throw new Error('No existe una membresia anterior para restaurar. No se modifico ningun dato.');
+            }
+
+            const previousPeriod = nextHistory[nextHistory.length - 1];
+            const previousExpiration = parseLocalDateInput(previousPeriod.endDate);
+            const restoredStatus = previousExpiration ? getMembershipStatus(previousExpiration, 'active') : 'active';
+            nextHistory = nextHistory.map((period, index) => index === nextHistory.length - 1
+                ? { ...period, status: restoredStatus === 'active' ? 'active' as const : 'closed' as const }
+                : period);
+
+            Object.assign(updateData, {
+                plan: previousPeriod.plan,
+                planPrice: previousPeriod.planPrice,
+                amountPaid: previousPeriod.amountPaid,
+                debt: previousPeriod.debt,
+                startDate: previousPeriod.startDate,
+                endDate: previousPeriod.endDate,
+                expirationDate: previousExpiration,
+                status: restoredStatus,
+                membershipHistory: nextHistory
+            });
+        }
+
+        await updateDoc(memberRef, updateData);
         setModalMode('none');
         setSelectedMember(undefined);
     };
@@ -1883,6 +2002,7 @@ export function MembersPage() {
                         setSelectedMember(undefined);
                     }}
                     onSubmit={handleCreateOrUpdateMember}
+                    onCancelFutureRenewal={selectedMember ? handleCancelFutureRenewal : undefined}
                 />
             )}
 
