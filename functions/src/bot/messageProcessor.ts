@@ -964,7 +964,14 @@ export async function executeTool(name: string, args: any) {
                     lines.push(`⚠️ Saldo pendiente: S/ ${debt.toFixed(2)}`);
                 }
                 if (futureDebt > 0) {
-                    lines.push(`🕒 Saldo futuro: S/ ${futureDebt.toFixed(2)} desde ${member.futureDebtStartDate || startDateStr || 'N/A'}`);
+                    const futurePlanPrice = Number(member.futureDebtPlanPrice || 0);
+                    const futureAdvancePaid = futurePlanPrice > 0 ? Math.max(0, futurePlanPrice - futureDebt) : 0;
+                    const futureDateRaw = String(member.futureDebtStartDate || startDateStr || '');
+                    const futureDateLabel = futureDateRaw.includes('-') ? futureDateRaw.split('-').reverse().slice(0, 2).join('/') : (futureDateRaw || 'N/A');
+                    const futureLine = futureAdvancePaid > 0
+                        ? '🕒 A cuenta S/ ' + futureAdvancePaid.toFixed(2) + ' · Falta S/ ' + futureDebt.toFixed(2) + ' (desde ' + futureDateLabel + ')'
+                        : '🕒 Falta S/ ' + futureDebt.toFixed(2) + ' (desde ' + futureDateLabel + ')';
+                    lines.push(futureLine);
                 }
                 if (member.culqiOrderId || lastPayment?.orderId) {
                     const orderId = (member.culqiOrderId || lastPayment?.orderId).toString().slice(-10).toUpperCase();

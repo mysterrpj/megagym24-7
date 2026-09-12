@@ -758,4 +758,11 @@ git branch --show-current
 - El mismo texto se aplicó en la ventana de edición del miembro, antes decía Renovacion futura pendiente.
 - Cálculo: el monto a cuenta se obtiene de futureDebtPlanPrice menos futureDebt; si no existe el precio del plan futuro, se muestra solo el saldo pendiente.
 - Cuando llega la fecha de inicio, el aviso amarillo desaparece solo y el saldo pasa a mostrarse como deuda actual en rojo, usando la regla existente expiredFutureDebt.
-- Archivo tocado: src/pages/dashboard/MembersPage.tsx. Desplegado en hosting el 2026-09-12.Fin del documento. Cualquier IA debe confirmar que leyó AI_CONTEXT.md y CONTEXTO_PROYECTO.md antes de trabajar.
+- Archivo tocado: src/pages/dashboard/MembersPage.tsx. Desplegado en hosting el 2026-09-12.
+---
+
+## 21. Actualización 2026-09-12 — Comprobante de WhatsApp alineado con el panel
+
+- El voucher que envía Sofía por WhatsApp ya no dice Saldo futuro; ahora muestra el monto a cuenta y el saldo pendiente de la renovación futura, con la fecha en formato DD/MM, por ejemplo: A cuenta S/ 80.00 - Falta S/ 70.00 (desde 14/09).
+- Cálculo en el bot: el monto a cuenta es futureDebtPlanPrice menos futureDebt; si no hay precio del plan futuro, solo se muestra el saldo pendiente.
+- Archivo tocado: functions/src/bot/messageProcessor.ts. Desplegado solo twilioWebhookWhatsapp el 2026-09-12.Fin del documento. Cualquier IA debe confirmar que leyó AI_CONTEXT.md y CONTEXTO_PROYECTO.md antes de trabajar.
