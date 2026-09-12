@@ -749,4 +749,13 @@ git branch --show-current
   - La app de rutinas ahora pide iniciar sesión con correo y contraseña, la misma cuenta admin del panel, antes de entrar al editor. Los links compartidos con ?id= siguen abiertos al público para las alumnas.
   - firestore.rules: sharedRoutines permite get público para links compartidos, y list y escritura solo para admin; se agregaron reglas admin-only para clientes, clients, students y alumnas.
 - Archivos tocados: rutinas/App.tsx y firestore.rules.
-- Desplegado el 2026-08-31: hosting de rutinas-robert y reglas de Firestore.Fin del documento. Cualquier IA debe confirmar que leyó AI_CONTEXT.md y CONTEXTO_PROYECTO.md antes de trabajar.
+- Desplegado el 2026-08-31: hosting de rutinas-robert y reglas de Firestore.
+---
+
+## 20. Actualización 2026-09-12 — Textos de renovación futura en el panel
+
+- El aviso amarillo de renovación futura ahora muestra lo abonado y lo que falta, con la fecha en formato DD/MM, por ejemplo: A cuenta S/ 80.00 - Falta S/ 70.00 (desde 14/09).
+- El mismo texto se aplicó en la ventana de edición del miembro, antes decía Renovacion futura pendiente.
+- Cálculo: el monto a cuenta se obtiene de futureDebtPlanPrice menos futureDebt; si no existe el precio del plan futuro, se muestra solo el saldo pendiente.
+- Cuando llega la fecha de inicio, el aviso amarillo desaparece solo y el saldo pasa a mostrarse como deuda actual en rojo, usando la regla existente expiredFutureDebt.
+- Archivo tocado: src/pages/dashboard/MembersPage.tsx. Desplegado en hosting el 2026-09-12.Fin del documento. Cualquier IA debe confirmar que leyó AI_CONTEXT.md y CONTEXTO_PROYECTO.md antes de trabajar.

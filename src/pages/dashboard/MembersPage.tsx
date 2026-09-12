@@ -527,7 +527,7 @@ function MemberModal({
                 {member && Number(member.futureDebt || 0) > 0 && onCancelFutureRenewal && (
                     <div className="border border-yellow-500/30 bg-yellow-500/10 rounded-lg p-3 space-y-2">
                         <p className="text-xs text-yellow-300">
-                            Renovacion futura pendiente: S/ {Number(member.futureDebt || 0).toFixed(2)} desde {member.futureDebtStartDate || 'fecha no registrada'}.
+                            {Number(member.futureDebtPlanPrice || 0) > 0 ? 'A cuenta S/ ' + Math.max(0, Number(member.futureDebtPlanPrice) - Number(member.futureDebt || 0)).toFixed(2) + ' · Falta S/ ' + Number(member.futureDebt || 0).toFixed(2) : 'Falta S/ ' + Number(member.futureDebt || 0).toFixed(2)} desde {member.futureDebtStartDate ? String(member.futureDebtStartDate).split('-').reverse().join('/') : 'fecha no registrada'}.
                         </p>
                         <Button
                             type="button"
@@ -1938,6 +1938,10 @@ export function MembersPage() {
                                                 todayStart.setHours(0, 0, 0, 0);
                                                 const isFutureDebtActuallyFuture = !!futureDebtDate && futureDebtDate > todayStart;
                                                 const futureDebt = isFutureDebtActuallyFuture ? rawFutureDebt : 0;
+                                                const futurePlanPrice = Number(member.futureDebtPlanPrice || 0);
+                                                const futureAdvancePaid = futurePlanPrice > 0 ? Math.max(0, futurePlanPrice - futureDebt) : 0;
+                                                const futureDateRaw = String(member.futureDebtStartDate || member.expirationDate || '');
+                                                const futureDateLabel = futureDateRaw.includes('-') ? futureDateRaw.split('-').reverse().slice(0, 2).join('/') : futureDateRaw;
                                                 const unpaidFromPlan = Math.max(0, Number(member.planPrice || 0) - Number(member.amountPaid || 0));
                                                 const expiredFutureDebt = rawFutureDebt > 0 && !isFutureDebtActuallyFuture && unpaidFromPlan > 0 ? rawFutureDebt : 0;
                                                 const currentDebt = debt > 0 ? debt : expiredFutureDebt;
@@ -1950,7 +1954,7 @@ export function MembersPage() {
                                                         )}
                                                         {futureDebt > 0 && (
                                                             <span className="block text-[10px] bg-yellow-500/20 text-yellow-300 border border-yellow-500/30 px-2 py-0.5 rounded-full font-bold">
-                                                                Futuro: S/ {futureDebt.toFixed(2)} desde {member.futureDebtStartDate || member.expirationDate}
+                                                                {futureAdvancePaid > 0 ? 'A cuenta S/ ' + futureAdvancePaid.toFixed(2) + ' · Falta S/ ' + futureDebt.toFixed(2) + ' (desde ' + futureDateLabel + ')' : 'Falta S/ ' + futureDebt.toFixed(2) + ' (desde ' + futureDateLabel + ')'}
                                                             </span>
                                                         )}
                                                     </div>
