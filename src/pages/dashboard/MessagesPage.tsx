@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -96,6 +96,7 @@ export function MessagesPage() {
     const [selectedPhone, setSelectedPhone] = useState<string | null>(null);
     const [messages, setMessages] = useState<Message[]>([]);
     const [memberNames, setMemberNames] = useState<Record<string, string>>({});
+    const messageListRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
         const q = query(collection(db, 'members'), orderBy('createdAt', 'desc'));
@@ -142,6 +143,7 @@ export function MessagesPage() {
     useEffect(() => {
         if (!selectedPhone) return;
 
+        setMessages([]);
         const normalizedSelectedPhone = normalizePhone(selectedPhone);
         const q = query(collection(db, 'messages'), orderBy('timestamp', 'asc'));
 
@@ -154,6 +156,14 @@ export function MessagesPage() {
 
         return () => unsubscribe();
     }, [selectedPhone]);
+
+    useLayoutEffect(() => {
+        if (!selectedPhone || messages.length === 0) return;
+        const messageList = messageListRef.current;
+        if (!messageList) return;
+
+        messageList.scrollTop = messageList.scrollHeight;
+    }, [selectedPhone, messages]);
 
     const selectedConversation = conversations.find((conv) => conv.phone === selectedPhone);
 
@@ -226,7 +236,7 @@ export function MessagesPage() {
                             </div>
                         </div>
 
-                        <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-black/20">
+                        <div ref={messageListRef} className="flex-1 overflow-y-auto p-4 space-y-4 bg-black/20">
                             {messages.map((msg, index) => {
                                 const previousMessage = messages[index - 1];
                                 const currentDate = getMessageDate(msg.timestamp);

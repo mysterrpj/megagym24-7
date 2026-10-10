@@ -840,4 +840,11 @@ git branch --show-current
 - Pruebas: 10 casos unitarios aprobados y una suite de integración lista para Firestore Emulator.
 - Estado: commiteado en `01c93fca`, todavía pendiente de despliegue coordinado de funciones + firestore.rules + Hosting y prueba descrita en `RESERVAS-LOCAL.md`.
 
+---
+
+## 24. Actualización 2026-10-10 — Mensajes abre en la conversación reciente
+
+- `MessagesPage` limpia el historial anterior al cambiar de cliente y, después de cargar o recibir mensajes, posiciona inmediatamente el contenedor en el final.
+- El desplazamiento es instantáneo, sin animación larga, para que recepción llegue directamente al mensaje más reciente incluso en conversaciones antiguas extensas.
+
 Fin del documento. Cualquier IA debe confirmar que leyó AI_CONTEXT.md y CONTEXTO_PROYECTO.md antes de trabajar.
