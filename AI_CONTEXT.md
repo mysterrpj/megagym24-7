@@ -1,4 +1,4 @@
-﻿# AI_CONTEXT.md — Memoria Técnica Permanente de MegaGym 24/7
+# AI_CONTEXT.md — Memoria Técnica Permanente de MegaGym 24/7
 
 > **Para cualquier IA que vaya a trabajar en este repositorio:** lee este documento
 > **completo** antes de proponer o ejecutar cualquier cambio. Este archivo es la puerta de
@@ -6,7 +6,7 @@
 > manda es lo que **este archivo** describe como estado real, y debes avisar del desfase en tu
 > respuesta.
 
-- **Última actualización:** 2026-08-29
+- **Última actualización:** 2026-10-10
 - **Rama de trabajo activa:** `feature/voz-agora`
 - **Proyecto Firebase principal:** `fit-ia-megagym`
 - **Propietario/operador:** Robert Pichihua Julca (WhatsApp del propietario: `+51951296572`)
@@ -82,7 +82,7 @@ plataforma modular que también controle:
 
 ---
 
-## 4. Estado actual (2026-08-29)
+## 4. Estado actual (2026-10-10)
 
 ### 4.1 Proyectos involucrados
 
@@ -108,6 +108,7 @@ plataforma modular que también controle:
 - Rama `master`: estado anterior a la voz (rollback completo = volver a `master` y redeploy).
 - Flujo habitual: commits pequeños en `feature/voz-agora`, push a GitHub, deploy con Firebase CLI.
 - No hay CI/CD automático verificado para functions; el deploy es manual (`firebase deploy`).
+- Commit `01c93fca` agrega reservas públicas de clases y endurece recordatorios. La función `membershipReminder` sí quedó desplegada en producción el 2026-10-10; las nuevas funciones/rutas/reglas de reservas públicas están commiteadas pero requieren su despliegue coordinado antes de usarse en producción.
 
 ---
 
@@ -205,33 +206,40 @@ Cloud Scheduler ? membershipReminder (19:00 Lima) / classBookingReminder (cada 3
 ¦   +-- lib/
 ¦   ¦   +-- firebase.ts            ? Inicialización Firebase con VITE_*
 ¦   ¦   +-- auth.tsx               ? useUserRole, RequireAuth, RequireAdmin
+¦   ¦   +-- classReservations.ts   ? Cliente de las callable de reservas
 ¦   ¦   +-- utils.ts               ? Helpers como cn
 ¦   +-- hooks/useFirestore.ts      ? useMembers, useClasses, useMemberships
 ¦   +-- components/
 ¦   ¦   +-- layout/                ? DashboardLayout y Sidebar
 ¦   ¦   +-- ui/                    ? button, card, input, label, select
 ¦   ¦   +-- dashboard/NewInvoiceDialog.tsx
+¦   ¦   +-- classes/                ? Diálogos admin y plano de 20 ubicaciones
 ¦   ¦   +-- landing/PhoneMockup.tsx
 ¦   +-- pages/
 ¦       +-- LandingPage.tsx        ? Pública
 ¦       +-- LoginPage.tsx y RegisterPage.tsx
 ¦       +-- PublicPaymentPage.tsx  ? /pagar, Culqi Checkout v4
+¦       +-- PublicClassSchedulePage.tsx   ? /reservar, horarios públicos
+¦       +-- PublicClassReservationPage.tsx? /reservar/clase/:classId, reserva pública
 ¦       +-- MemberDashboard.tsx    ? Portal cliente, básico y sin prioridad
 ¦       +-- dashboard/
 ¦           +-- MessagesPage.tsx   ? Historial de conversaciones
 ¦           +-- MembersPage.tsx    ? CRUD de miembros, pagos, rutinas y dieta
 ¦           +-- MembershipsPage.tsx? Planes
-¦           +-- ClassesPage.tsx    ? Clases y reservas, vista demo si vacío
+¦           +-- ClassesPage.tsx    ? Clases, configuración pública y plano de reservas
 ¦           +-- PaymentsPage.tsx   ? Transacciones, facturas y reenvío de voucher
 ¦           +-- AccessPage.tsx     ? Registros de acceso, accessLogs
 ¦           +-- SettingsPage.tsx   ? Config del gym, SELECTOR DE VOZ y seed
 +-- functions/
     +-- package.json               ? Node 22, dependencias de backend
     +-- tsconfig.json
-    +-- functions.yaml             ? Spec generada de endpoints, no editar a mano
+    +-- functions.yaml             ? Generado por CLI; eliminado y gitignored para no bloquear descubrimiento de endpoints
     +-- .env                       ? SECRETOS, gitignored, NUNCA commitear
+    +-- tests/                     ? Pruebas de reservas y política de recordatorios
     +-- src/
         +-- index.ts               ? TODAS las Cloud Functions y helpers
+        +-- classReservations.ts   ? Backend transaccional de reservas públicas/admin
+        +-- reminderPolicy.ts      ? Estado por fecha Lima y elegibilidad de recordatorios
         +-- index.ts.bak e index.ts.new  ? Backups legacy, no usar
         +-- bot/
         ¦   +-- messageProcessor.ts? CEREBRO de Sofía, tools, prompt e intercepts
@@ -296,7 +304,7 @@ Tool interna, no expuesta al LLM:
 
 ### 8.2 Webhooks y funciones HTTP, functions/src/index.ts
 
-Todas las Cloud Functions viven en un solo archivo:
+Los endpoints se exportan desde `index.ts`; la lógica transaccional de reservas públicas vive en `classReservations.ts`:
 
 - twilioWebhookWhatsapp, HTTP, 1GB y 120s — recibe mensajes de WhatsApp, resuelve el menú, transcribe audio, guarda messages, llama a processMessage y responde TwiML.
 - culqiWebhook, HTTP, 512MB — escucha checkout.order.paid, crea reserva de clase, aplica pago de deuda o renueva membresía y envía confirmación y voucher.
@@ -305,6 +313,9 @@ Todas las Cloud Functions viven en un solo archivo:
 - sendManualWhatsAppMessage, Callable, 512MB y 120s — reenvío manual de voucher desde el panel.
 - membershipReminder, Scheduler, 512MB y 300s — todos los días a las 19:00 Lima.
 - classBookingReminder, Scheduler, 512MB y 300s — cada 30 minutos.
+- getPublicClassSchedule y getPublicClassSession, Callable — exponen horarios, cupos y plano sin identidades.
+- createPublicClassReservation, getPublicClassReservation y cancelPublicClassReservation, Callable — crean/consultan/cancelan una reserva pública mediante token privado.
+- adminClassReservation, Callable — creación, confirmación de pago, asistencia y cancelación solo para admin.
 - serveVoucher, HTTP, 512MB — sirve imágenes de vouchers desde Storage.
 - getVoiceContext, HTTP, 256MB y 30s — valida JWT de voz y entrega contexto mínimo del miembro.
 - saveVoiceSessionMemory, HTTP, 512MB y 60s — guarda el resumen de la llamada de voz en assistantMemory.
@@ -338,17 +349,31 @@ Reglas:
 
 membershipReminder, 19:00 Lima:
 
+- `reminderPolicy.ts` deriva el estado real con `endDate` calendario de Lima: vigente = active, 1–30 días vencido = overdue y más de 30 días = inactive. Una fecha ausente/inválida falla cerrada y no permite avisos.
+- Sincroniza de forma transaccional el status persistido, pero respeta `inactive` y `prospect` explícitos como overrides administrativos.
 - 3 días antes del vencimiento envía aviso amigable sin link.
-- Miembros con assistantMemory.renewalIntent igual a continue_pay_later y 5 días o más sin respuesta reciben un recordatorio suave una sola vez, marcado con renewalFollowupSentAt.
-- Día 1 y día 7 de vencido envía recordatorio de renovación y marca lastOverdueReminderDay.
-- Deuda mayor a 0 envía recordatorio de saldo cada 7 días desde startDate y se detiene al pagar.
-- Nunca envía a miembros inactive o prospect.
+- Miembros overdue con assistantMemory.renewalIntent igual a continue_pay_later y 5 días o más sin respuesta reciben un recordatorio suave; la intención debe pertenecer al ciclo actual.
+- Día 1 y día 7 de vencido envía recordatorio de renovación; la marca queda ligada a `endDate` para no bloquear ciclos futuros.
+- Deuda mayor a 0 envía recordatorio semanal desde startDate solo mientras la membresía esté active u overdue; inactivos como Ruth nunca son elegibles aunque el status guardado estuviera desactualizado.
+- Cada intento usa `scheduledReminderDeliveries/{deliveryId}` con clave determinista por miembro, ciclo, tipo y etapa. Se reclama en transacción y se vuelve a validar el miembro justo antes de llamar a Twilio; no se reintenta automáticamente un resultado ambiguo para evitar duplicados.
+- Cuando llega `futureDebtStartDate`, el job promueve transaccionalmente futureDebt a debt y activa el periodo futuro.
+- Corrección desplegada y verificada el 2026-10-10: Ruth y Carmen quedaron inactive; la deuda futura de Fiorela pasó a deuda actual.
 
 classBookingReminder, cada 30 minutos:
 
 - Revisa reservas confirmed del día; si faltan 90 a 150 minutos para la clase, envía recordatorio.
 - Se omite si la reserva se hizo el mismo día con 2 horas o menos de anticipación.
 - Marca classReminderSentAt para no repetir.
+
+Reservas públicas de clases, aún pendientes de despliegue coordinado:
+
+- `/reservar` lista los próximos 7 días y `/reservar/clase/:classId?fecha=YYYY-MM-DD` muestra 20 ubicaciones (5 × 4).
+- La clase debe estar active, tener capacidad 1–20, `publicBookingEnabled=true`, precio e instrucciones de pago.
+- La alumna elige Yape o Plin, envía nombre, celular peruano, ubicación y código de operación. La reserva nace pending hasta que un admin confirme el pago.
+- Firestore se modifica solo mediante callable y transacciones: una ubicación por fecha, una reserva por persona/sesión, operación de pago única, requestId idempotente, rate limits y auditoría.
+- La página pública recibe únicamente estados de ubicaciones y un token de 64 caracteres para consultar/cancelar su propia reserva; nunca ve identidades ni códigos de otras personas.
+- Reservas legacy ambiguas o sin ubicación bloquean la disponibilidad en vez de adivinar una migración.
+- Pruebas locales documentadas en `RESERVAS-LOCAL.md`; usar emuladores antes de desplegar funciones y reglas juntas.
 
 ### 8.6 Voz de Sofía, sin Agora
 
@@ -390,7 +415,7 @@ classBookingReminder, cada 30 minutos:
 - SettingsPage: datos del gym en config/gym, selector de voz en settings/voice y botón de seed de prueba.
 - MembersPage: CRUD, pago en efectivo, renovación, rutinas en studentRoutineAssignments, dieta en member.diet y notas admin en adminNotes.
 - PaymentsPage: transacciones y facturas, con reenvío de voucher por WhatsApp.
-- ClassesPage: CRUD de clases y reservas, con vista demo si classes está vacía.
+- ClassesPage: CRUD de clases y sesiones; configura capacidad, precio, reservas públicas e instrucciones de pago, comparte enlaces y administra el plano de 20 ubicaciones con confirmación, asistencia y cancelación.
 - MessagesPage: historial de conversaciones que resuelve el nombre por teléfono, sin envío manual tipo CRM.
 - MemberDashboard de cliente: existe pero está básico y hardcodeado; sin prioridad porque el portal quedó descartado.
 
@@ -424,14 +449,23 @@ classBookingReminder, cada 30 minutos:
 6. createCulqiCharge o culqiWebhook actualiza members con status active, nuevo startDate y endDate, expirationDate, debt, amountPaid y membershipHistory, cerrando el periodo anterior.
 7. WhatsApp confirma el pago y envía el voucher en texto.
 
-### 9.4 Reservar clase grupal FULLBODY pagada
+### 9.4 Reservar clase grupal
+
+Flujo legacy de Sofía + Culqi:
 
 1. El cliente pide FULLBODY o aeróbicos.
-2. Sofía pregunta el horario, 8:30 AM o 8:00 PM, si no lo dijo.
-3. get_available_classes valida la clase activa y la próxima fecha.
-4. generate_payment_link con paymentType class_booking arma el link de S/6.
-5. Tras el pago, createPaidClassBooking en transacción verifica que la clase exista y esté activa, que no haya reserva duplicada del mismo miembro en esa fecha, que haya cupo según capacity, y crea bookings con status confirmed y los datos del pago.
-6. WhatsApp confirma la reserva y classBookingReminder avisará el día de la clase.
+2. Sofía pregunta el horario si no lo dijo; get_available_classes valida clase activa y próxima fecha.
+3. generate_payment_link con paymentType class_booking arma el link de pago.
+4. Tras el pago, createPaidClassBooking confirma en transacción si la clase no usa el nuevo plano público. Las clases con `publicBookingEnabled=true` deben pasar por el flujo seguro de ubicación y revisión manual.
+5. WhatsApp confirma la reserva y classBookingReminder avisará el día de la clase.
+
+Flujo público nuevo, aún no desplegado en producción:
+
+1. La alumna abre `/reservar`, elige una sesión y una ubicación libre.
+2. Envía nombre, celular, Yape/Plin y código de operación; createPublicClassReservation crea bookings con status pending y token privado.
+3. El panel ve la reserva en el plano; adminClassReservation confirma pago o membresía, marca asistencia o cancela.
+4. La alumna consulta su estado con token; puede cancelar solo mientras siga pending y antes del inicio.
+5. Cancelar libera claims y ubicación; cada cambio incrementa reservationVersion y queda en classReservationAudit.
 
 ### 9.5 Pago de deuda
 
@@ -475,9 +509,10 @@ classBookingReminder, cada 30 minutos:
 
 ### 9.10 Recordatorios
 
-- Todos los días a las 19:00 Lima, membershipReminder revisa vencimiento en 3 días, renovación diferida de 5 días o más, vencido día 1 o 7 y deuda cada 7 días.
-- Cada 30 minutos, classBookingReminder revisa reservas de 90 a 150 minutos antes de la clase.
-- Ambos guardan el mensaje en messages con su source para auditoría.
+- Todos los días a las 19:00 Lima, membershipReminder deriva estado por endDate, sincroniza estados, activa deuda futura vencida y evalúa vencimiento en 3 días, renovación diferida, vencido día 1 o 7 y deuda semanal.
+- Solo active y overdue reciben avisos; inactive, prospect o endDate inválido quedan excluidos.
+- Cada envío de membresía/deuda usa un ledger determinista en scheduledReminderDeliveries y guarda reminderDeliveryId y twilioSid en messages.
+- Cada 30 minutos, classBookingReminder revisa reservas de 90 a 150 minutos antes de la clase y usa classReminderSentAt.
 
 ---
 
@@ -536,7 +571,9 @@ VITE_FIREBASE_APP_ID
 - startDate y endDate, string YYYY-MM-DD — inicio y vencimiento de la membresía actual.
 - expirationDate, Timestamp — vencimiento, duplicado de endDate para queries.
 - planPrice, amountPaid y debt, number — precio, total pagado histórico y deuda actual.
-- futureDebt y futureDebtStartDate — saldo futuro por adelantos.
+- futureDebt, futureDebtStartDate, futureDebtPlan y futureDebtPlanPrice — renovación futura; membershipReminder la promueve de forma transaccional a deuda actual al llegar la fecha.
+- statusDerivedAt y futureDebtActivatedAt, Timestamp — auditoría de sincronización automática.
+- lastOverdueReminderDay, lastOverdueReminderEndDate y lastOverdueReminderAt — etapa enviada ligada al ciclo de membresía.
 - diet, string — dieta pegada por el admin en el campo Dieta Actual para Bot.
 - trainingProfile, object — objetivo, nivel, diasSemana, limitaciones, horarioHabitual, preferenciaClases, constancia, estadoMotivacional, ultimaRutinaReportada, adherenciaEntrenamiento, ejercicioDificil, progresoReportado, molestiaEntrenando, riesgoAbandono, adherenciaNutricional, dificultadNutricional, comidaProblematica, patronRecaida, preferenciasAlimentarias y notasTrainer.
 - assistantMemory, object — ultimaInteraccionClave, ultimaInteraccionTexto, resumenConversacional, ultimaSesionVozResumen, ultimoCanal, updatedAt, lastVoiceSessionAt, renewalIntent, renewalIntentText, renewalIntentAt y renewalFollowupSentAt.
@@ -553,8 +590,12 @@ Regla crítica: debt es la fuente de verdad de la deuda. No recalcular restando 
 ### Otras colecciones
 
 - memberships — planes con name, price, duration, features y activeMembers.
-- classes — clases con name, instructor, day de 0 a 6, time HH:mm, capacity y status active o inactive.
-- bookings — reservas con memberId, classId, date, status confirmed o cancelled, paymentType, paymentAmount, paymentMethod, culqiChargeId, culqiOrderId, created_at y classReminderSentAt.
+- classes — clases con name, instructor, day/dayIndex, time HH:mm, duration, capacity 1–20, price, status, publicBookingEnabled, paymentInstructions y reservationVersion.
+- bookings — reservas por sesión con classId, date, spotNumber, startsAt, memberId, memberName, phone, status pending/confirmed/cancelled, paymentStatus, paymentMethod, amount, checkedIn, generation, claimIds, source, tokens hash para públicas y timestamps.
+- classBookingClaims — unicidad transaccional por persona/clase/fecha; escritura solo backend.
+- classReservationRequests y classReservationOperations — idempotencia por requestId y código de operación.
+- classReservationRateLimits — límites por IP/teléfono; classReservationAudit y classReservationArchive — auditoría y generaciones reemplazadas.
+- scheduledReminderDeliveries — ledger de intento único con memberId, phone, source, membershipCycle, stage, status, twilioSid y timestamps.
 - payments — transacciones del panel con memberName, memberId, concept, amount, method, invoiceType, date y createdAt.
 - messages — historial de chat con phone, content, direction inbound o outbound, timestamp y source; índices compuestos de phone y timestamp.
 - accessLogs — ingresos con memberId, memberName, phone, source, intentText, statusAtAccess, allowed, reason, createdAt, localDate, localTime y testMode.
@@ -569,8 +610,10 @@ Regla crítica: debt es la fuente de verdad de la deuda. No recalcular restando 
 
 - Admin por emails autorizados con acceso total.
 - members: cada usuario autenticado solo lee y escribe su documento con document igual a uid y role igual a user, y no puede asignarse admin.
-- memberships, classes, bookings, payments, messages, config, settings, accessLogs y studentRoutineAssignments solo para admin.
-- El bot usa Admin SDK por backend y no depende de estas reglas.
+- memberships, classes, payments, messages, config, settings, accessLogs y studentRoutineAssignments solo para admin.
+- bookings es lectura admin y escritura denegada al navegador: incluso el panel administra reservas mediante callable backend.
+- classBookingClaims y classReservationPrivate quedan totalmente privados; las demás colecciones internas de reserva no se exponen al público.
+- El bot y las callable usan Admin SDK por backend y no dependen de estas reglas.
 - Verificado en producción: sin sesión da 403 y con sesión admin da 200.
 
 ---
@@ -579,16 +622,16 @@ Regla crítica: debt es la fuente de verdad de la deuda. No recalcular restando 
 
 1. Estados de miembro: active, overdue e inactive, y prospect para no registrados. En el panel solo se usan Activo, Vencido e Inactivo.
 2. Política por días vencido: 0 días acceso completo; de 1 a 14 días acceso completo sin avisos ni links, solo si el cliente pregunta; 15 días o más bloquea rutina, dieta, voucher, historial y estado, responde general con normalidad y no menciona el bloqueo.
-3. Deuda: member.debt es la verdad. Un miembro vencido por más de 30 días pasa a Inactivo por edición manual o regla del panel.
+3. Deuda: member.debt es la verdad. Un miembro vencido por más de 30 días pasa a inactive por política compartida del backend/panel; el scheduler sincroniza el campo persistido y nunca le envía recordatorios.
 4. Precios: 1 mes S/70, 2 meses S/120, 3 meses S/150, Interdiario S/50 y clase grupal S/6; la web informativa muestra S/80 y es una discrepancia histórica por confirmar.
 5. Horarios: lunes a viernes de 6:00 a 22:00, sábados de 6:00 a 18:00 y domingos de 6:00 a 12:00.
-6. Clases grupales: FULLBODY con LIZ PIA, lunes a viernes a las 8:30 AM y 8:00 PM, S/6, abiertas al público general; la reserva se confirma tras el pago; el pase de máquinas por día se paga en recepción sin link.
+6. Clases grupales: cada clase define día, hora, capacidad máxima 20 y precio. El flujo público usa ubicación por fecha y nace pending hasta verificación de Yape/Plin; nunca expone identidades. El flujo Culqi legacy sigue solo para clases sin publicBookingEnabled. El pase de máquinas por día se paga en recepción sin link.
 7. Voz: solo elegibles con menos de 15 días vencido y no inactivo; los pagos no se hacen por voz y se pasa el link por WhatsApp; el selector del panel no se elimina ni se reduce.
 8. Memoria: chat y voz comparten assistantMemory y trainingProfile; Sofía completa el perfil poco a poco y nunca como formulario.
 9. Menú: opcional; menu u opciones lo abren; el aviso discreto sigue las reglas de la sección 8.3.
 10. Acceso: la Fase 2A solo registra y no abre puerta; modo prueba solo con el número del propietario hasta aprobación.
 11. Voucher: texto actual; los pagos de S/0 no generan voucher; si no hay pago, se dice.
-12. Recordatorios: nunca a inactivos; respetar las ventanas de tiempo de la sección 8.5.
+12. Recordatorios: nunca a inactivos ni prospectos; el estado se deriva de endDate en Lima y cada etapa usa ledger determinista para evitar repetición.
 
 ---
 
@@ -618,6 +661,8 @@ Regla crítica: debt es la fuente de verdad de la deuda. No recalcular restando 
 ### Riesgos técnicos
 
 - messageProcessor.ts es compartido por el webhook y los recordatorios; un cambio roto rompe todo el bot. Los cambios deben ser aditivos, con build y prueba con el número del propietario.
+- `functions/functions.yaml` está eliminado y gitignored: era un manifiesto generado que impedía a firebase-tools descubrir endpoints nuevos. No volver a versionarlo.
+- Las reservas públicas están commiteadas pero no declaradas activas en producción hasta desplegar juntas las callable y firestore.rules y completar la prueba de `RESERVAS-LOCAL.md`.
 - NO activar el acceso para todos sin orden explícita del propietario; las banderas son ACCESS_LOG_ENABLED y ACCESS_LOG_TEST_PHONES.
 - functions.config debe migrarse a parámetros antes de marzo 2027 y aún no está hecho.
 - Código legacy sin uso: ai/agent.ts, tools/definitions.ts, index.ts.bak e index.ts.new; no tocarlos sin permiso y documentar antes de borrar.
@@ -650,6 +695,7 @@ Regla crítica: debt es la fuente de verdad de la deuda. No recalcular restando 
 - Terminar pruebas de la Fase 2A con el propietario: menu, quiero pagar, quiero mi rutina y a que hora abren, y confirmar que pagos, rutina, menú y voz siguen funcionando.
 - Migrar functions.config a parámetros antes de marzo 2027.
 - Rotar claves expuestas en logs, opcional pero recomendado.
+- Probar reservas públicas con emuladores según `RESERVAS-LOCAL.md`; después desplegar funciones y reglas de Firestore en la misma ventana, validar una reserva pendiente y recién entonces publicar Hosting.
 
 ### Medio plazo, según PLAN_GIMNASIO_INTELIGENTE
 
@@ -728,6 +774,11 @@ Esta sección es un contrato de trabajo. Cualquier IA que toque este repositorio
 ```text
 npm run dev            desarrollo del panel
 npm run build          build de producción del panel, tsc y vite
+npm run test:reminders política de recordatorios
+npm run test:reservations reservas; test de emulador se omite si FIRESTORE_EMULATOR_HOST no existe
+npm run emulators      Auth + Firestore + Functions locales
+npm run emulators:seed cuenta, clases y enlaces de prueba
+npm run dev:emulator   frontend conectado a emuladores
 cd functions
 npm.cmd run build      build de functions, tsc
 cd ..
@@ -765,4 +816,28 @@ git branch --show-current
 
 - El voucher que envía Sofía por WhatsApp ya no dice Saldo futuro; ahora muestra el monto a cuenta y el saldo pendiente de la renovación futura, con la fecha en formato DD/MM, por ejemplo: A cuenta S/ 80.00 - Falta S/ 70.00 (desde 14/09).
 - Cálculo en el bot: el monto a cuenta es futureDebtPlanPrice menos futureDebt; si no hay precio del plan futuro, solo se muestra el saldo pendiente.
-- Archivo tocado: functions/src/bot/messageProcessor.ts. Desplegado solo twilioWebhookWhatsapp el 2026-09-12.Fin del documento. Cualquier IA debe confirmar que leyó AI_CONTEXT.md y CONTEXTO_PROYECTO.md antes de trabajar.
+- Archivo tocado: functions/src/bot/messageProcessor.ts. Desplegado solo twilioWebhookWhatsapp el 2026-09-12.
+
+---
+
+## 22. Actualización 2026-10-10 — Recordatorios coherentes con inactividad
+
+- Causa corregida: el panel calculaba inactive por fecha, pero el scheduler confiaba en el status persistido. Ruth estaba guardada active con endDate 2026-05-16 y deuda S/49, por eso recibió recordatorios semanales meses después.
+- `reminderPolicy.ts` centraliza fechas YYYY-MM-DD, estado efectivo y etapas de aviso. Más de 30 días vencido es inactive y una fecha inválida no es elegible.
+- `membershipReminder` sincroniza status en transacción, vuelve a validar el documento antes del envío y usa `scheduledReminderDeliveries` para un intento máximo por etapa/ciclo.
+- Los marcadores overdue se ligan a endDate; las intenciones diferidas deben pertenecer al ciclo actual; nuevas intenciones reinician renewalFollowupSentAt.
+- La deuda futura se activa transaccionalmente al llegar futureDebtStartDate.
+- Se añadieron 7 pruebas en `functions/tests/reminderPolicy.test.js`.
+- Desplegado solo `membershipReminder` y ejecutado manualmente para sincronizar producción: Ruth y Carmen quedaron inactive; Fiorela pasó futureDebt a debt. Verificado que Ruth no recibió otro mensaje.
+
+---
+
+## 23. Actualización 2026-10-10 — Reservas públicas por ubicación
+
+- Código agregado para calendario público, sesión, plano de 20 lugares, solicitud pending con Yape/Plin, token privado, cancelación propia y administración desde ClassesPage.
+- Seguridad: callable backend, transacciones, claims por identidad, código de operación único, requestId idempotente, rate limits, auditoría, archivo de generaciones y reglas que niegan escrituras directas a bookings.
+- Rutas: `/reservar` y `/reservar/clase/:classId?fecha=YYYY-MM-DD`.
+- Pruebas: 10 casos unitarios aprobados y una suite de integración lista para Firestore Emulator.
+- Estado: commiteado en `01c93fca`, todavía pendiente de despliegue coordinado de funciones + firestore.rules + Hosting y prueba descrita en `RESERVAS-LOCAL.md`.
+
+Fin del documento. Cualquier IA debe confirmar que leyó AI_CONTEXT.md y CONTEXTO_PROYECTO.md antes de trabajar.
