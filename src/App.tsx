@@ -15,6 +15,8 @@ import { AccessPage } from '@/pages/dashboard/AccessPage';
 
 import { RegisterPage } from '@/pages/RegisterPage';
 import { PublicPaymentPage } from '@/pages/PublicPaymentPage';
+import { PublicClassSchedulePage } from '@/pages/PublicClassSchedulePage';
+import { PublicClassReservationPage } from '@/pages/PublicClassReservationPage';
 
 import { RequireAdmin, RequireAuth } from '@/lib/auth';
 import { MemberDashboard } from '@/pages/MemberDashboard';
@@ -27,6 +29,8 @@ function App() {
                 <Route path="/login" element={<LoginPage />} />
                 <Route path="/register" element={<RegisterPage />} />
                 <Route path="/pagar" element={<PublicPaymentPage />} />
+                <Route path="/reservar" element={<PublicClassSchedulePage />} />
+                <Route path="/reservar/clase/:classId" element={<PublicClassReservationPage />} />
 
                 {/* Member Routes */}
                 <Route element={<RequireAuth />}>

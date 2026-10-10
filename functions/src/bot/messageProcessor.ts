@@ -1,4 +1,4 @@
-
+import { diffDateOnlyDays } from '../reminderPolicy';
 
 // Busca un miembro probando múltiples formatos de teléfono
 async function findMember(db: any, phone: string) {
@@ -581,6 +581,9 @@ async function reserveClass(db: any, adminInner: any, args: any) {
         }
 
         const classData = classDoc.data() || {};
+        if (classData.publicBookingEnabled === true) {
+            return { error: 'Use the secure public class reservation page to choose a seat and submit payment for review.' };
+        }
         if (classData.status === 'inactive') {
             return { error: "Class is inactive" };
         }
@@ -600,6 +603,7 @@ async function reserveClass(db: any, adminInner: any, args: any) {
         }
 
         const bookingRef = db.collection('bookings').doc();
+        transaction.update(classRef, { reservationVersion: adminInner.firestore.FieldValue.increment(1) });
         transaction.set(bookingRef, {
             memberId,
             classId: String(args.classId),
@@ -717,10 +721,8 @@ export async function executeTool(name: string, args: any) {
                 if (memberData) {
                     let daysOverdue: number | null = null;
                     if (memberData.endDate) {
-                        const end = new Date(memberData.endDate);
-                        const today = new Date();
-                        today.setHours(0, 0, 0, 0);
-                        daysOverdue = Math.max(0, Math.floor((today.getTime() - end.getTime()) / (1000 * 60 * 60 * 24)));
+                        const overdueDays = diffDateOnlyDays(memberData.endDate, getLimaTodayString());
+                        if (overdueDays !== null) daysOverdue = Math.max(0, overdueDays);
                     }
                     const memberStatus = String(memberData.status || '');
                     if (memberStatus === 'inactive' || memberStatus === 'expired') {
@@ -1119,11 +1121,8 @@ export async function executeTool(name: string, args: any) {
                 // bloquea el acceso personalizado (misma frontera que las rutinas/dieta).
                 let daysOverdueLocal: number | null = null;
                 if (memberData.endDate) {
-                    const end = new Date(memberData.endDate);
-                    const today = new Date();
-                    today.setHours(0, 0, 0, 0);
-                    const diff = Math.ceil((end.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-                    if (diff < 0) daysOverdueLocal = Math.abs(diff);
+                    const overdueDays = diffDateOnlyDays(memberData.endDate, getLimaTodayString());
+                    if (overdueDays !== null && overdueDays > 0) daysOverdueLocal = overdueDays;
                 }
                 const eligible = memberData.status !== 'inactive'
                     && (daysOverdueLocal === null || daysOverdueLocal < 15);
@@ -1390,13 +1389,10 @@ export async function processMessage(db: any, phone: string, messageText: string
         const profile = savedMemory?.profile || data.trainingProfile || {};
         const profileStep = data.profileStep || 0;
 
-        // Calcular días hasta vencimiento (negativo = ya venció)
+        // Calcular con fechas calendario de Lima (negativo = ya venció).
         if (data.endDate) {
-            const end = new Date(data.endDate);
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
-            daysUntilExpiry = Math.ceil((end.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-            if (daysUntilExpiry < 0) {
+            daysUntilExpiry = diffDateOnlyDays(getLimaTodayString(), data.endDate);
+            if (daysUntilExpiry !== null && daysUntilExpiry < 0) {
                 daysOverdue = Math.abs(daysUntilExpiry); // cuántos días lleva vencido
             }
         }
@@ -1428,6 +1424,8 @@ export async function processMessage(db: any, phone: string, messageText: string
                 renewalIntent: 'continue_pay_later',
                 renewalIntentText: String(messageText || '').trim().slice(0, 220),
                 renewalIntentAt: adminInner.firestore.FieldValue.serverTimestamp(),
+                // Every new intent starts a new follow-up cycle.
+                renewalFollowupSentAt: null,
                 updatedAt: adminInner.firestore.FieldValue.serverTimestamp()
             }
         }, { merge: true });

@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Search, UserPlus, Mail, Phone, MoreHorizontal, ChevronLeft, ChevronRight, X, CreditCard, Edit, Trash, Loader2, Banknote, Dumbbell, ExternalLink, ToggleLeft, ToggleRight } from 'lucide-react';
+import { Search, UserPlus, Mail, Phone, MoreHorizontal, ChevronLeft, ChevronRight, X, CreditCard, Edit, Trash, Loader2, Banknote, Dumbbell, ExternalLink, ToggleLeft, ToggleRight, AlertTriangle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { httpsCallable } from 'firebase/functions';
 import { functions, db } from '@/lib/firebase';
@@ -93,6 +93,31 @@ const getPlanPrice = (planName: string, fallback = 70) => getPlanOption(planName
 
 const getPlanDays = (planName: string) => getPlanOption(planName)?.days ?? 30;
 
+const normalizeDni = (value?: string) => String(value || '').replace(/\D/g, '');
+
+const normalizePhone = (value?: string) => {
+    let digits = String(value || '').replace(/\D/g, '');
+    if (digits.length === 11 && digits.startsWith('51')) digits = digits.slice(2);
+    return digits;
+};
+
+const findDuplicateIdentity = <T extends { id: string; dni?: string; phone?: string }>(
+    records: T[],
+    dni?: string,
+    phone?: string,
+    excludedId?: string
+) => {
+    const normalizedDni = normalizeDni(dni);
+    const normalizedPhone = normalizePhone(phone);
+
+    return records.find((record) => {
+        if (record.id === excludedId) return false;
+        const sameDni = normalizedDni.length === 8 && normalizeDni(record.dni) === normalizedDni;
+        const samePhone = normalizedPhone.length >= 7 && normalizePhone(record.phone) === normalizedPhone;
+        return sameDni || samePhone;
+    });
+};
+
 const normalizeMembershipHistory = (history: any): MembershipPeriod[] => {
     return Array.isArray(history) ? history.map((item) => ({
         id: String(item.id || `${item.startDate || 'inicio'}_${item.endDate || 'fin'}`),
@@ -168,13 +193,17 @@ function StatsCard({ title, value, color }: { title: string; value: number; colo
 // Member Modal Component (Create & Edit)
 function MemberModal({
     member, // If provided, we are in Edit mode
+    existingMembers,
     onClose,
     onSubmit,
+    onUseExisting,
     onCancelFutureRenewal
 }: {
     member?: Member;
+    existingMembers: Member[];
     onClose: () => void;
-    onSubmit: (data: any) => void;
+    onSubmit: (data: any) => Promise<boolean>;
+    onUseExisting: (member: Member, action: 'edit' | 'renew') => void;
     onCancelFutureRenewal?: () => Promise<void>;
 }) {
     const [name, setName] = useState(member?.name || '');
@@ -195,6 +224,7 @@ function MemberModal({
     const [adminNotes, setAdminNotes] = useState(member?.adminNotes || '');
     const [diet, setDiet] = useState(member?.diet || '');
     const [cancellingFutureRenewal, setCancellingFutureRenewal] = useState(false);
+    const [saving, setSaving] = useState(false);
 
     // Payment fields
     const [planPrice, setPlanPrice] = useState(member?.planPrice?.toString() || '70');
@@ -260,7 +290,8 @@ function MemberModal({
         if (!baseDate) return;
 
         const newDate = new Date(baseDate);
-        newDate.setDate(newDate.getDate() + getPlanDays(plan));
+        // Membership ranges are inclusive: a 30-day plan ends 29 days after its start.
+        newDate.setDate(newDate.getDate() + getPlanDays(plan) - 1);
 
         if (!isNaN(newDate.getTime())) {
             setExpirationDate(formatLocalDateInput(newDate));
@@ -282,23 +313,36 @@ function MemberModal({
     }, [expirationDate, status]);
 
     const debt = Math.max(0, (parseFloat(planPrice) || 0) - (parseFloat(amountPaid) || 0));
+    const duplicateMember = findDuplicateIdentity(existingMembers, dni, phone, member?.id);
+    const duplicateMatchesDni = !!duplicateMember && normalizeDni(dni).length === 8 && normalizeDni(duplicateMember.dni) === normalizeDni(dni);
+    const duplicateMatchesPhone = !!duplicateMember && normalizePhone(phone).length >= 7 && normalizePhone(duplicateMember.phone) === normalizePhone(phone);
 
-    const handleSubmit = () => {
-        if (!name || !phone) return;
-        onSubmit({
-            id: member?.id,
-            name, dni, email, phone, plan, status,
-            amountPaid: parseFloat(amountPaid) || 0,
-            planPrice: parseFloat(planPrice) || 0,
-            expirationDateStr: expirationDate,
-            joinDateStr: joinDate,
-            membershipStartDateStr: membershipStartDate,
-            debt: debt,
-            adminNotes,
-            diet: diet,
-            trainingProfile: objetivo ? { objetivo, nivel, diasSemana: parseInt(diasSemana) || 0, limitaciones, notasTrainer } : null
-        });
-        onClose();
+    const handleSubmit = async () => {
+        if (!name.trim() || !phone.trim() || duplicateMember || saving) return;
+        setSaving(true);
+        try {
+            const saved = await onSubmit({
+                id: member?.id,
+                name: name.trim(),
+                dni: normalizeDni(dni),
+                email: email.trim(),
+                phone: phone.trim(),
+                plan,
+                status,
+                amountPaid: parseFloat(amountPaid) || 0,
+                planPrice: parseFloat(planPrice) || 0,
+                expirationDateStr: expirationDate,
+                joinDateStr: joinDate,
+                membershipStartDateStr: membershipStartDate,
+                debt,
+                adminNotes,
+                diet,
+                trainingProfile: objetivo ? { objetivo, nivel, diasSemana: parseInt(diasSemana) || 0, limitaciones, notasTrainer } : null
+            });
+            if (saved) onClose();
+        } finally {
+            setSaving(false);
+        }
     };
 
     const handleCancelFutureRenewal = async () => {
@@ -352,8 +396,9 @@ function MemberModal({
                             <input
                                 type="text"
                                 value={dni}
-                                onChange={(e) => setDni(e.target.value)}
+                                onChange={(e) => setDni(e.target.value.replace(/\D/g, '').slice(0, 8))}
                                 placeholder="12345678"
+                                inputMode="numeric"
                                 maxLength={8}
                                 className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-green-500 transition-colors"
                             />
@@ -389,6 +434,56 @@ function MemberModal({
                             </div>
                         </div>
                     </div>
+
+                    {duplicateMember && (
+                        <div role="alert" aria-live="polite" className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
+                            <div className="flex items-start gap-3">
+                                <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" />
+                                <div className="min-w-0 flex-1">
+                                    <p className="text-sm font-semibold text-amber-200">Este miembro ya está registrado</p>
+                                    <p className="mt-1 text-xs text-amber-100/70">
+                                        Coincide el {duplicateMatchesDni && duplicateMatchesPhone ? 'DNI y teléfono' : duplicateMatchesDni ? 'DNI' : 'teléfono'}. No se creará una ficha duplicada.
+                                    </p>
+                                    <div className="mt-3 flex items-center justify-between gap-3 rounded-md border border-white/10 bg-neutral-900/60 p-2.5">
+                                        <div className="min-w-0">
+                                            <p className="truncate text-sm font-medium text-white">{duplicateMember.name}</p>
+                                            <p className="truncate text-xs text-gray-400">
+                                                {duplicateMember.dni ? `DNI ${duplicateMember.dni} · ` : ''}{duplicateMember.phone}
+                                            </p>
+                                        </div>
+                                        <span className={cn(
+                                            "shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold",
+                                            duplicateMember.status === 'active'
+                                                ? "border-green-500/25 bg-green-500/10 text-green-400"
+                                                : duplicateMember.status === 'overdue'
+                                                    ? "border-red-500/25 bg-red-500/10 text-red-400"
+                                                    : "border-neutral-600 bg-neutral-700/50 text-gray-300"
+                                        )}>
+                                            {duplicateMember.status === 'active' ? 'Activo' : duplicateMember.status === 'overdue' ? 'Vencido' : 'Inactivo'}
+                                        </span>
+                                    </div>
+                                    <div className="mt-3 grid grid-cols-2 gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => onUseExisting(duplicateMember, 'edit')}
+                                            className="inline-flex items-center justify-center gap-1.5 rounded-md border border-neutral-600 bg-neutral-800 px-3 py-2 text-xs font-medium text-gray-200 transition-colors hover:bg-neutral-700 focus:outline-none focus:ring-2 focus:ring-amber-500/50"
+                                        >
+                                            <Edit className="h-3.5 w-3.5" />
+                                            Editar ficha
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => onUseExisting(duplicateMember, 'renew')}
+                                            className="inline-flex items-center justify-center gap-1.5 rounded-md bg-green-600 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500/50"
+                                        >
+                                            <Banknote className="h-3.5 w-3.5" />
+                                            Renovar membresía
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
 
                     {/* Plan & Status */}
                     <div className="grid grid-cols-2 gap-3">
@@ -657,10 +752,11 @@ function MemberModal({
                 {/* Submit Button */}
                 <Button
                     onClick={handleSubmit}
-                    disabled={!name || !phone}
+                    disabled={!name.trim() || !phone.trim() || !!duplicateMember || saving}
                     className="w-full bg-green-600 hover:bg-green-700 text-white font-medium py-2.5 mt-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                    {member ? 'Guardar Cambios' : 'Crear Miembro'}
+                    {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    {saving ? 'Guardando...' : duplicateMember ? 'Miembro ya registrado' : member ? 'Guardar Cambios' : 'Crear Miembro'}
                 </Button>
             </div>
         </div>
@@ -803,11 +899,13 @@ function PaymentModal({
 function CashPaymentModal({
     member,
     onClose,
-    onSubmit
+    onSubmit,
+    startWithRenewal = false
 }: {
     member: Member;
     onClose: () => void;
     onSubmit: (amount: number, method: string, renewalData?: { plan: string; planPrice: number; startDate: Date }) => Promise<void>;
+    startWithRenewal?: boolean;
 }) {
     const needsRenewal = member.status === 'overdue' || member.status === 'inactive';
     const debt = Math.max(0, Number(member.debt) || 0);
@@ -817,7 +915,7 @@ function CashPaymentModal({
     const submittingRef = useRef(false);
 
     // Renewal fields
-    const [isRenewing, setIsRenewing] = useState(needsRenewal && debt <= 0);
+    const [isRenewing, setIsRenewing] = useState(startWithRenewal || (needsRenewal && debt <= 0));
     const [selectedPlan, setSelectedPlan] = useState(() => {
         const match = PLAN_OPTIONS.find(p => p.name === member.plan);
         return match ? match.name : 'Plan Mensual';
@@ -836,8 +934,15 @@ function CashPaymentModal({
         if (planOption) setAmount(planOption.price.toString());
     }, [selectedPlan, isRenewing]);
 
+    const previousRenewalStartDate = (() => {
+        if (!member.expirationDateObj) return null;
+        const nextDay = new Date(member.expirationDateObj);
+        nextDay.setDate(nextDay.getDate() + 1);
+        return nextDay;
+    })();
+
     const getStartDate = (): Date => {
-        if (startDateMode === 'prev' && member.expirationDateObj) return member.expirationDateObj;
+        if (startDateMode === 'prev' && previousRenewalStartDate) return new Date(previousRenewalStartDate);
         if (startDateMode === 'custom') {
             return parseLocalDateInput(customDate) || new Date();
         }
@@ -849,7 +954,7 @@ function CashPaymentModal({
         const planOption = getPlanOption(selectedPlan);
         const start = getStartDate();
         const end = new Date(start);
-        end.setDate(end.getDate() + (planOption?.days ?? getPlanDays(selectedPlan)));
+        end.setDate(end.getDate() + (planOption?.days ?? getPlanDays(selectedPlan)) - 1);
         return end.toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' });
     })();
 
@@ -927,7 +1032,7 @@ function CashPaymentModal({
                             <div className="space-y-1.5">
                                 <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-300">
                                     <input type="radio" name="startDate" value="prev" checked={startDateMode === 'prev'} onChange={() => setStartDateMode('prev')} className="accent-green-500" />
-                                    Desde vencimiento anterior ({member.expirationDate})
+                                    Después del vencimiento actual ({previousRenewalStartDate?.toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' }) || member.expirationDate})
                                 </label>
                                 <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-300">
                                     <input type="radio" name="startDate" value="today" checked={startDateMode === 'today'} onChange={() => setStartDateMode('today')} className="accent-green-500" />
@@ -1373,6 +1478,7 @@ export function MembersPage() {
     const [selectedMember, setSelectedMember] = useState<Member | undefined>(undefined);
     const [showPaymentModal, setShowPaymentModal] = useState(false);
     const [showCashPaymentModal, setShowCashPaymentModal] = useState(false);
+    const [cashPaymentStartsWithRenewal, setCashPaymentStartsWithRenewal] = useState(false);
     const [showRoutinesModal, setShowRoutinesModal] = useState(false);
 
     // Real-time Firestore Subscription
@@ -1388,19 +1494,16 @@ export function MembersPage() {
 
                 let expDateObj = new Date(); // Default
 
-                if (data.expirationDate?.toDate) {
-                    // Use saved expiration date if available
+                const canonicalEndDate = parseLocalDateInput(data.endDate);
+                if (canonicalEndDate) {
+                    // The scheduler and bot use this date-only field as the source of truth.
+                    expDateObj = canonicalEndDate;
+                } else if (data.expirationDate?.toDate) {
                     expDateObj = data.expirationDate.toDate();
                 } else {
-                    // Fallback to calculation
+                    // Legacy fallback with the same inclusive day count used on renewal.
                     expDateObj = new Date(created);
-                    if (planName.includes('trimestral') || planName.includes('3 mes')) {
-                        expDateObj.setMonth(expDateObj.getMonth() + 3);
-                    } else if (planName.includes('mensual') || planName.includes('1 mes') || planName.includes('mes')) {
-                        expDateObj.setMonth(expDateObj.getMonth() + 1);
-                    } else {
-                        expDateObj.setFullYear(expDateObj.getFullYear() + 1);
-                    }
+                    expDateObj.setDate(expDateObj.getDate() + getPlanDays(planName) - 1);
                 }
 
                 expirationDate = expDateObj.toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' });
@@ -1454,6 +1557,7 @@ export function MembersPage() {
             setShowPaymentModal(true);
         } else if (action === 'cashPayment') {
             setSelectedMember(member);
+            setCashPaymentStartsWithRenewal(false);
             setShowCashPaymentModal(true);
         } else if (action === 'edit') {
             setSelectedMember(member);
@@ -1469,6 +1573,18 @@ export function MembersPage() {
                     .finally(() => setDeletingMemberId(null));
             }
         }
+    };
+
+    const handleUseExistingMember = (existingMember: Member, action: 'edit' | 'renew') => {
+        setSelectedMember(existingMember);
+        if (action === 'edit') {
+            setModalMode('edit');
+            return;
+        }
+
+        setModalMode('none');
+        setCashPaymentStartsWithRenewal(true);
+        setShowCashPaymentModal(true);
     };
 
     const handleCashPayment = async (amount: number, method: string, renewalData?: { plan: string; planPrice: number; startDate: Date }) => {
@@ -1489,17 +1605,21 @@ export function MembersPage() {
 
         if (renewalData) {
             const existingFutureDebt = Math.max(0, Number(currentMemberData.futureDebt) || 0);
-            const existingFutureStart = parseLocalDateInput(currentMemberData.futureDebtStartDate);
+            const existingFuturePeriod = currentHistory.find((period) => period.status === 'future');
+            const existingFutureStartStr = String(currentMemberData.futureDebtStartDate || existingFuturePeriod?.startDate || '');
+            const existingFutureStart = parseLocalDateInput(existingFutureStartStr);
             const todayStart = new Date(today);
             todayStart.setHours(0, 0, 0, 0);
 
-            if (existingFutureDebt > 0 && existingFutureStart && existingFutureStart > todayStart) {
-                alert(`Ya existe una renovacion futura pendiente de S/ ${existingFutureDebt.toFixed(2)} desde ${currentMemberData.futureDebtStartDate}. Cancelala o registra su pago antes de crear otra.`);
+            if (existingFuturePeriod || (existingFutureStart && existingFutureStart > todayStart)) {
+                const balanceText = existingFutureDebt > 0 ? ` con saldo pendiente de S/ ${existingFutureDebt.toFixed(2)}` : ' ya pagada';
+                alert(`Ya existe una renovacion futura${balanceText} desde ${existingFutureStartStr || 'la fecha registrada'}. Activa, cancela o revisa esa renovacion antes de crear otra.`);
                 return;
             }
 
             const newEndDate = new Date(renewalData.startDate);
-            newEndDate.setDate(newEndDate.getDate() + getPlanDays(renewalData.plan));
+            // Keep manual renewals aligned with the backend's inclusive 30/60/90-day periods.
+            newEndDate.setDate(newEndDate.getDate() + getPlanDays(renewalData.plan) - 1);
 
             const startStr = formatLocalDateInput(renewalData.startDate);
             const endStr = formatLocalDateInput(newEndDate);
@@ -1543,6 +1663,14 @@ export function MembersPage() {
                 endDate: endStr,
                 expirationDate: newEndDate,
                 membershipHistory: nextHistory,
+                assistantMemory: {
+                    ...(currentMemberData.assistantMemory || {}),
+                    renewalIntent: null,
+                    renewalIntentText: null,
+                    renewalIntentAt: null,
+                    renewalFollowupSentAt: null,
+                    updatedAt: today.toISOString()
+                },
                 ...(amount > 0 ? {
                     payments: arrayUnion({
                         amount,
@@ -1631,11 +1759,25 @@ export function MembersPage() {
         }
 
         setShowCashPaymentModal(false);
+        setCashPaymentStartsWithRenewal(false);
         setSelectedMember(undefined);
     };
 
-    const handleCreateOrUpdateMember = async (data: any) => {
+    const handleCreateOrUpdateMember = async (data: any): Promise<boolean> => {
         try {
+            const identitySnapshot = await getDocs(collection(db, 'members'));
+            const registeredIdentities = identitySnapshot.docs.map((memberDoc) => ({
+                id: memberDoc.id,
+                dni: String(memberDoc.data().dni || ''),
+                phone: String(memberDoc.data().phone || '')
+            }));
+            const duplicate = findDuplicateIdentity(registeredIdentities, data.dni, data.phone, data.id);
+
+            if (duplicate) {
+                alert('No se guardó la ficha porque ya existe un miembro con el mismo DNI o teléfono. Usa la ficha existente para editar o renovar.');
+                return false;
+            }
+
             // Fix Date Timezone Issue for Expiration
             const [y, m, d] = data.expirationDateStr ? data.expirationDateStr.split('-').map(Number) : [0, 0, 0];
             const expirationDateObj = data.expirationDateStr ? new Date(y, m - 1, d) : null;
@@ -1662,8 +1804,10 @@ export function MembersPage() {
                 await addDoc(collection(db, 'members'), {
                     name: data.name,
                     dni: data.dni || '',
+                    dniNormalized: normalizeDni(data.dni),
                     email: data.email,
                     phone: data.phone,
+                    phoneNormalized: normalizePhone(data.phone),
                     plan: data.plan,
                     status: data.status,
                     amountPaid: data.amountPaid,
@@ -1707,8 +1851,10 @@ export function MembersPage() {
                 await updateDoc(memberRef, {
                     name: data.name,
                     dni: data.dni || '',
+                    dniNormalized: normalizeDni(data.dni),
                     email: data.email,
                     phone: data.phone,
+                    phoneNormalized: normalizePhone(data.phone),
                     plan: data.plan,
                     status: data.status,
                     amountPaid: data.amountPaid,
@@ -1726,12 +1872,12 @@ export function MembersPage() {
                 });
             }
 
+            return true;
         } catch (error) {
             console.error("Error saving member:", error);
             alert("Error al guardar el miembro.");
+            return false;
         }
-        setModalMode('none');
-        setSelectedMember(undefined);
     };
 
     const handleCancelFutureRenewal = async () => {
@@ -2000,12 +2146,15 @@ export function MembersPage() {
             {/* Create / Edit Member Modal */}
             {modalMode !== 'none' && (
                 <MemberModal
+                    key={`${modalMode}-${selectedMember?.id || 'new'}`}
                     member={selectedMember} // Pass selected member for editing
+                    existingMembers={members}
                     onClose={() => {
                         setModalMode('none');
                         setSelectedMember(undefined);
                     }}
                     onSubmit={handleCreateOrUpdateMember}
+                    onUseExisting={handleUseExistingMember}
                     onCancelFutureRenewal={selectedMember ? handleCancelFutureRenewal : undefined}
                 />
             )}
@@ -2022,7 +2171,12 @@ export function MembersPage() {
             {showCashPaymentModal && selectedMember && (
                 <CashPaymentModal
                     member={selectedMember}
-                    onClose={() => { setShowCashPaymentModal(false); setSelectedMember(undefined); }}
+                    startWithRenewal={cashPaymentStartsWithRenewal}
+                    onClose={() => {
+                        setShowCashPaymentModal(false);
+                        setCashPaymentStartsWithRenewal(false);
+                        setSelectedMember(undefined);
+                    }}
                     onSubmit={handleCashPayment}
                 />
             )}

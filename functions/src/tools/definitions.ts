@@ -86,6 +86,9 @@ async function reserveClass(db: any, admin: any, args: any) {
         if (!classDoc.exists) return { error: "Class not found" };
 
         const classData = classDoc.data() || {};
+        if (classData.publicBookingEnabled === true) {
+            return { error: 'Use the secure public class reservation page to choose a seat and submit payment for review.' };
+        }
         if (classData.status === 'inactive') return { error: "Class is inactive" };
 
         const bookingQuery = db.collection('bookings').where('classId', '==', String(args.classId));
@@ -102,6 +105,7 @@ async function reserveClass(db: any, admin: any, args: any) {
         }
 
         const bookingRef = db.collection('bookings').doc();
+        transaction.update(classRef, { reservationVersion: admin.firestore.FieldValue.increment(1) });
         transaction.set(bookingRef, {
             memberId,
             classId: String(args.classId),

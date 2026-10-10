@@ -77,6 +77,16 @@ export async function generatePaymentLink(phone: string, planName: string, optio
             : 'membership';
 
     if (paymentType === 'class_booking') {
+        // Only classes that opened public seat booking must be routed to the reviewed flow.
+        // Classes without that flag (and legacy calls without a classId) keep working as before.
+        const admin = require('firebase-admin');
+        if (!admin.apps.length) admin.initializeApp();
+        if (options.classId) {
+            const classDoc = await admin.firestore().collection('classes').doc(String(options.classId)).get();
+            if (classDoc.exists && classDoc.data()?.publicBookingEnabled === true) {
+                throw new Error('Use the secure class reservation page for this class; no Culqi order was created.');
+            }
+        }
         amount = 600;
     } else if (paymentType === 'debt_payment') {
         amount = Math.round((Number(options.amount) || 0) * 100);

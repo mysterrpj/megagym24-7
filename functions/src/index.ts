@@ -1,4 +1,31 @@
 import * as functions from "firebase-functions/v1";
+import {
+    getPublicClassScheduleHandler,
+    getPublicClassSessionHandler,
+    createPublicClassReservationHandler,
+    getPublicClassReservationHandler,
+    cancelPublicClassReservationHandler,
+    adminClassReservationHandler,
+} from './classReservations';
+import {
+    buildReminderDeliveryId,
+    canReceiveAutomatedMembershipReminder,
+    deriveMembershipLifecycleStatus,
+    diffDateOnlyDays,
+    getDebtReminderWeek,
+    getOverdueReminderStage,
+    getUpcomingExpiryReminderStage,
+    shouldActivateFutureMembership,
+} from './reminderPolicy';
+
+// Declared here (not re-exported) and with an inline handler because firebase-tools only
+// discovers `export const name = functions.https.onCall(<inline function>)` in the entry point.
+export const getPublicClassSchedule = functions.https.onCall((input: any, context: any) => getPublicClassScheduleHandler(input, context));
+export const getPublicClassSession = functions.https.onCall((input: any, context: any) => getPublicClassSessionHandler(input, context));
+export const createPublicClassReservation = functions.https.onCall((input: any, context: any) => createPublicClassReservationHandler(input, context));
+export const getPublicClassReservation = functions.https.onCall((input: any, context: any) => getPublicClassReservationHandler(input, context));
+export const cancelPublicClassReservation = functions.https.onCall((input: any, context: any) => cancelPublicClassReservationHandler(input, context));
+export const adminClassReservation = functions.https.onCall((input: any, context: any) => adminClassReservationHandler(input, context));
 
 const admin = require('firebase-admin');
 if (!admin.apps.length) {
@@ -155,7 +182,16 @@ function buildMembershipRenewalData(
         status: 'active', plan: plan.name, startDate, endDate,
         expirationDate: adminInner.firestore.Timestamp.fromDate(parseLimaDate(endDate)),
         amountPaid: paidAmount, planPrice: plan.price, debt,
-        membershipHistory: history, paymentApprovedAt: nowIso
+        membershipHistory: history,
+        assistantMemory: {
+            ...(memberData.assistantMemory || {}),
+            renewalIntent: null,
+            renewalIntentText: null,
+            renewalIntentAt: null,
+            renewalFollowupSentAt: null,
+            updatedAt: nowIso
+        },
+        paymentApprovedAt: nowIso
     };
 }
 
@@ -209,6 +245,10 @@ async function createPaidClassBooking(db: any, phone: string, classId: string, b
         }
 
         const classData = classDoc.data() || {};
+        // Public seat classes must use the reviewed reservation flow, not legacy unassigned Culqi allocation.
+        if (classData.publicBookingEnabled === true) {
+            throw new Error('This class requires the secure class reservation flow. Contact administration for payment reconciliation.');
+        }
         if (classData.status === 'inactive') {
             throw new Error('Class is inactive.');
         }
@@ -235,6 +275,7 @@ async function createPaidClassBooking(db: any, phone: string, classId: string, b
         }
 
         const bookingRef = db.collection('bookings').doc();
+        transaction.update(classRef, { reservationVersion: admin.firestore.FieldValue.increment(1) });
         transaction.set(bookingRef, {
             memberId: memberDoc.id,
             classId: String(classId),
@@ -702,6 +743,14 @@ export const createCulqiCharge = functions
         cors(req, res, async () => {
             try {
                 const { token, email, amount, orderId, phone, planName, paymentType, classId, bookingDate } = req.body;
+                if (paymentType === 'class_booking' && classId) {
+                    // Only classes that opened public seat booking are diverted to the reviewed flow.
+                    const classDoc = await admin.firestore().collection('classes').doc(String(classId)).get();
+                    if (classDoc.exists && classDoc.data()?.publicBookingEnabled === true) {
+                        res.status(409).json({ success: false, error: 'Use the secure class reservation flow for this class.' });
+                        return;
+                    }
+                }
                 const CULQI_PRIVATE_KEY = process.env.CULQI_PRIVATE_KEY;
                 if (!CULQI_PRIVATE_KEY) throw new Error('CULQI_PRIVATE_KEY not set');
 
@@ -855,6 +904,111 @@ export const sendManualWhatsAppMessage = functions
         return { success: true };
     });
 
+interface ScheduledReminderSendInput {
+    db: any;
+    adminInner: any;
+    twilioClient: any;
+    from: string;
+    phone: string;
+    content: string;
+    source: string;
+    deliveryId: string;
+    memberId: string;
+    memberRef: any;
+    membershipCycle: string;
+    stage: string | number;
+    isStillEligible: (member: any) => boolean;
+}
+
+async function sendScheduledReminder(input: ScheduledReminderSendInput) {
+    const deliveryRef = input.db.collection('scheduledReminderDeliveries').doc(input.deliveryId);
+    const now = Date.now();
+    const leaseUntil = input.adminInner.firestore.Timestamp.fromMillis(now + (15 * 60 * 1000));
+
+    const claimed = await input.db.runTransaction(async (transaction: any) => {
+        const memberSnapshot = await transaction.get(input.memberRef);
+        const deliverySnapshot = await transaction.get(deliveryRef);
+
+        if (!memberSnapshot.exists || !input.isStillEligible(memberSnapshot.data() || {})) return false;
+        // At-most-once application attempt per deterministic stage. Ambiguous Twilio failures
+        // remain visible for manual reconciliation instead of being retried automatically.
+        if (deliverySnapshot.exists) return false;
+
+        transaction.create(deliveryRef, {
+            memberId: input.memberId,
+            phone: input.phone,
+            source: input.source,
+            membershipCycle: input.membershipCycle,
+            stage: String(input.stage),
+            status: 'sending',
+            leaseUntil,
+            attemptCount: 1,
+            updatedAt: input.adminInner.firestore.FieldValue.serverTimestamp(),
+            createdAt: input.adminInner.firestore.FieldValue.serverTimestamp()
+        });
+        return true;
+    });
+
+    if (!claimed) return false;
+
+    let twilioSid = '';
+    try {
+        const sentMessage = await input.twilioClient.messages.create({
+            from: input.from,
+            to: `whatsapp:${input.phone}`,
+            body: input.content
+        });
+        twilioSid = String(sentMessage?.sid || 'accepted');
+
+        try {
+            await deliveryRef.set({
+                status: 'sent',
+                twilioSid,
+                sentAt: input.adminInner.firestore.FieldValue.serverTimestamp(),
+                leaseUntil: input.adminInner.firestore.FieldValue.delete(),
+                updatedAt: input.adminInner.firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+        } catch (deliveryError) {
+            // Twilio already accepted the message. Do not report the whole scheduled run as failed,
+            // because an automatic retry could send the same WhatsApp again.
+            console.error(`Reminder ${input.deliveryId} was accepted by Twilio but its ledger update failed:`, deliveryError);
+            return true;
+        }
+
+        try {
+            await input.db.collection('messages').add({
+                phone: input.phone,
+                content: input.content,
+                direction: 'outbound',
+                timestamp: input.adminInner.firestore.FieldValue.serverTimestamp(),
+                source: input.source,
+                reminderDeliveryId: input.deliveryId,
+                twilioSid
+            });
+        } catch (historyError) {
+            // Delivery is already recorded as sent. A missing dashboard history entry must not
+            // trigger a second customer-facing message.
+            console.error(`Reminder ${input.deliveryId} was sent but message history could not be saved:`, historyError);
+        }
+        return true;
+    } catch (error: any) {
+        if (!twilioSid) {
+            try {
+                await deliveryRef.set({
+                    status: 'uncertain',
+                    lastError: String(error?.message || error).slice(0, 500),
+                    failedAt: input.adminInner.firestore.FieldValue.serverTimestamp(),
+                    leaseUntil: input.adminInner.firestore.FieldValue.delete(),
+                    updatedAt: input.adminInner.firestore.FieldValue.serverTimestamp()
+                }, { merge: true });
+            } catch (ledgerError) {
+                console.error(`Could not record failed reminder ${input.deliveryId}:`, ledgerError);
+            }
+        }
+        throw error;
+    }
+}
+
 export const membershipReminder = functions
     .runWith({ memory: '512MB', timeoutSeconds: 300 })
     .pubsub.schedule('0 19 * * *')
@@ -865,128 +1019,240 @@ export const membershipReminder = functions
         const db = adminInner.firestore();
 
         const todayStr = getLimaDateString();
-        const in3daysStr = addDaysToLimaDate(todayStr, 3);
-
         const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
         const FROM = 'whatsapp:+51907935299';
+        let membersSnap = await db.collection('members').get();
+        let activatedFutureMembership = false;
 
-        const snap = await db.collection('members').where('endDate', '==', in3daysStr).get();
-        for (const doc of snap.docs) {
+        // Promote future-period debt when its membership start date arrives. Without this
+        // transition the balance remains hidden in futureDebt and never enters the reminder flow.
+        for (const doc of membersSnap.docs) {
             const member = doc.data();
-            const name = (member.name || 'amigo').split(' ')[0];
-            const phone = member.phone;
-            if (!phone) continue;
-            if ((member.status || '') === 'inactive') continue;
+            if (!shouldActivateFutureMembership(member, todayStr)) continue;
 
-            const msg = `¡Hola ${name}! 😊 Te aviso que tu membresía en MegaGym vence en 3 días. ¡Renueva a tiempo y no pierdas el ritmo! 💪🔥`;
             try {
-                await twilioClient.messages.create({ from: FROM, to: `whatsapp:${phone}`, body: msg });
-                await db.collection('messages').add({
-                    phone,
-                    content: msg,
-                    direction: 'outbound',
-                    timestamp: adminInner.firestore.FieldValue.serverTimestamp(),
-                    source: 'scheduled_membership_reminder'
+                const activated = await db.runTransaction(async (transaction: any) => {
+                    const freshSnapshot = await transaction.get(doc.ref);
+                    if (!freshSnapshot.exists) return false;
+                    const freshMember = freshSnapshot.data() || {};
+                    if (!shouldActivateFutureMembership(freshMember, todayStr)) return false;
+
+                    const futureStartDate = String(freshMember.futureDebtStartDate || '');
+                    const futureDebt = Math.max(0, Number(freshMember.futureDebt) || 0);
+                    const currentDebt = Math.max(0, Number(freshMember.debt) || 0);
+                    const membershipHistory = Array.isArray(freshMember.membershipHistory)
+                        ? freshMember.membershipHistory.map((period: any) => {
+                            if (period?.startDate === futureStartDate && period?.status === 'future') {
+                                return { ...period, status: 'active' };
+                            }
+                            return period;
+                        })
+                        : freshMember.membershipHistory;
+
+                    transaction.set(doc.ref, {
+                        debt: currentDebt + futureDebt,
+                        futureDebt: 0,
+                        futureDebtStartDate: '',
+                        futureDebtPlan: '',
+                        futureDebtPlanPrice: 0,
+                        ...(Array.isArray(freshMember.membershipHistory) ? { membershipHistory } : {}),
+                        futureDebtActivatedAt: adminInner.firestore.FieldValue.serverTimestamp(),
+                        updatedAt: adminInner.firestore.FieldValue.serverTimestamp()
+                    }, { merge: true });
+                    return true;
                 });
-                console.log(`Reminder sent to ${phone}`);
+                activatedFutureMembership = activatedFutureMembership || activated;
             } catch (e) {
-                console.error(`Error sending reminder to ${phone}:`, e);
+                console.error(`Error activating future membership for ${doc.id}:`, e);
             }
         }
 
-        const membersSnap = await db.collection('members').get();
+        if (activatedFutureMembership) {
+            membersSnap = await db.collection('members').get();
+        }
+
+        // Keep the persisted lifecycle aligned with the same date policy used by reminders.
+        // Explicit inactive/prospect values remain administrative overrides.
+        for (const doc of membersSnap.docs) {
+            try {
+                await db.runTransaction(async (transaction: any) => {
+                    const freshSnapshot = await transaction.get(doc.ref);
+                    if (!freshSnapshot.exists) return;
+
+                    const freshMember = freshSnapshot.data() || {};
+                    const storedStatus = String(freshMember.status || '').trim().toLowerCase();
+                    const derivedStatus = deriveMembershipLifecycleStatus(freshMember, todayStr);
+                    const canSynchronize = !['inactive', 'prospect'].includes(storedStatus)
+                        && ['active', 'overdue', 'inactive'].includes(derivedStatus);
+
+                    if (canSynchronize && derivedStatus !== storedStatus) {
+                        transaction.set(doc.ref, {
+                            status: derivedStatus,
+                            statusDerivedAt: adminInner.firestore.FieldValue.serverTimestamp()
+                        }, { merge: true });
+                    }
+                });
+            } catch (e) {
+                console.error(`Error synchronizing membership status for ${doc.id}:`, e);
+            }
+        }
+
+        // Use the synchronized documents for planning. Each delivery also re-checks the
+        // current member record transactionally before claiming its deterministic key.
+        membersSnap = await db.collection('members').get();
+
+        // Upcoming expiration reminder.
         for (const doc of membersSnap.docs) {
             const member = doc.data();
-            const phone = member.phone;
+            const phone = String(member.phone || '').trim();
             const endDate = String(member.endDate || '');
-            if (!phone || !endDate) continue;
-            if (['inactive', 'prospect'].includes(member.status || '')) continue;
+            const stage = getUpcomingExpiryReminderStage(member, todayStr);
+            if (!phone || stage === null) continue;
+
+            const name = (member.name || 'amigo').split(' ')[0];
+            const msg = `¡Hola ${name}! 😊 Te aviso que tu membresía en MegaGym vence en 3 días. ¡Renueva a tiempo y no pierdas el ritmo! 💪🔥`;
+            const deliveryId = buildReminderDeliveryId(doc.id, 'membership', endDate, `minus-${stage}`);
+            try {
+                const sent = await sendScheduledReminder({
+                    db, adminInner, twilioClient, from: FROM, phone, content: msg,
+                    source: 'scheduled_membership_reminder', deliveryId,
+                    memberId: doc.id, memberRef: doc.ref, membershipCycle: endDate, stage: `minus-${stage}`,
+                    isStillEligible: (freshMember: any) => String(freshMember.phone || '').trim() === phone
+                        && String(freshMember.endDate || '') === endDate
+                        && getUpcomingExpiryReminderStage(freshMember, todayStr) === stage
+                });
+                if (sent) console.log(`Membership reminder sent to ${phone}`);
+            } catch (e) {
+                console.error(`Error sending membership reminder to ${phone}:`, e);
+            }
+        }
+
+        // Deferred-renewal and overdue reminders. Members with debt use the debt flow instead.
+        for (const doc of membersSnap.docs) {
+            const member = doc.data();
+            const phone = String(member.phone || '').trim();
+            const endDate = String(member.endDate || '');
+            if (!phone || !endDate || !canReceiveAutomatedMembershipReminder(member, todayStr)) continue;
             if (Number(member.debt) > 0) continue;
 
             const name = (member.name || 'amigo').split(' ')[0];
+            const lifecycleStatus = deriveMembershipLifecycleStatus(member, todayStr);
+            const daysOverdue = diffLimaDays(endDate, todayStr);
             const renewalIntent = member.assistantMemory || {};
             const renewalIntentAt = renewalIntent.renewalIntentAt?.toDate?.();
-            if (renewalIntent.renewalIntent === 'continue_pay_later' && renewalIntentAt && !renewalIntent.renewalFollowupSentAt) {
-                const daysSinceIntent = diffLimaDays(getLimaDateString(renewalIntentAt), todayStr);
+            const renewalIntentDate = renewalIntentAt ? getLimaDateString(renewalIntentAt) : '';
+            const intentBelongsToCurrentCycle = !!renewalIntentDate && diffLimaDays(endDate, renewalIntentDate) > 0;
+            let deferredFollowupHandled = false;
+
+            if (lifecycleStatus === 'overdue' && intentBelongsToCurrentCycle && renewalIntent.renewalIntent === 'continue_pay_later' && renewalIntentAt && !renewalIntent.renewalFollowupSentAt) {
+                const daysSinceIntent = diffLimaDays(renewalIntentDate, todayStr);
                 if (daysSinceIntent >= 5) {
+                    const intentKey = String(renewalIntentAt.getTime());
                     const msg = `¡Hola ${name}! 😊 Te recuerdo con calma que tu renovación de MegaGym quedó pendiente. Cuando puedas, regularízala para seguir entrenando normal 💪`;
+                    const deliveryId = buildReminderDeliveryId(doc.id, 'deferred-renewal', endDate, intentKey);
                     try {
-                        await twilioClient.messages.create({ from: FROM, to: `whatsapp:${phone}`, body: msg });
-                        await db.collection('messages').add({
-                            phone,
-                            content: msg,
-                            direction: 'outbound',
-                            timestamp: adminInner.firestore.FieldValue.serverTimestamp(),
-                            source: 'scheduled_deferred_renewal_followup'
-                        });
-                        await doc.ref.set({
-                            assistantMemory: {
-                                ...renewalIntent,
-                                renewalFollowupSentAt: adminInner.firestore.FieldValue.serverTimestamp(),
-                                updatedAt: adminInner.firestore.FieldValue.serverTimestamp()
+                        const sent = await sendScheduledReminder({
+                            db, adminInner, twilioClient, from: FROM, phone, content: msg,
+                            source: 'scheduled_deferred_renewal_followup', deliveryId,
+                            memberId: doc.id, memberRef: doc.ref, membershipCycle: endDate, stage: intentKey,
+                            isStillEligible: (freshMember: any) => {
+                                const freshMemory = freshMember.assistantMemory || {};
+                                const freshIntentAt = freshMemory.renewalIntentAt?.toDate?.();
+                                const freshIntentDate = freshIntentAt ? getLimaDateString(freshIntentAt) : '';
+                                return String(freshMember.phone || '').trim() === phone
+                                    && String(freshMember.endDate || '') === endDate
+                                    && Number(freshMember.debt) <= 0
+                                    && deriveMembershipLifecycleStatus(freshMember, todayStr) === 'overdue'
+                                    && freshMemory.renewalIntent === 'continue_pay_later'
+                                    && !!freshIntentAt
+                                    && diffLimaDays(endDate, freshIntentDate) > 0
+                                    && freshIntentAt.getTime() === renewalIntentAt.getTime()
+                                    && !freshMemory.renewalFollowupSentAt;
                             }
-                        }, { merge: true });
-                        console.log(`Deferred renewal follow-up sent to ${phone}`);
+                        });
+                        if (sent) {
+                            await db.runTransaction(async (transaction: any) => {
+                                const freshSnapshot = await transaction.get(doc.ref);
+                                if (!freshSnapshot.exists) return;
+                                const freshMemory = freshSnapshot.data()?.assistantMemory || {};
+                                const freshIntentAt = freshMemory.renewalIntentAt?.toDate?.();
+                                if (!freshIntentAt || freshIntentAt.getTime() !== renewalIntentAt.getTime()) return;
+
+                                const followupUpdate: Record<string, any> = {
+                                    'assistantMemory.renewalFollowupSentAt': adminInner.firestore.FieldValue.serverTimestamp(),
+                                    'assistantMemory.updatedAt': adminInner.firestore.FieldValue.serverTimestamp()
+                                };
+                                if (daysOverdue === 1 || daysOverdue === 7) {
+                                    followupUpdate.lastOverdueReminderDay = daysOverdue;
+                                    followupUpdate.lastOverdueReminderEndDate = endDate;
+                                    followupUpdate.lastOverdueReminderAt = adminInner.firestore.FieldValue.serverTimestamp();
+                                }
+                                transaction.update(doc.ref, followupUpdate);
+                            });
+                            console.log(`Deferred renewal follow-up sent to ${phone}`);
+                        }
+                        deferredFollowupHandled = true;
                     } catch (e) {
                         console.error(`Error sending deferred renewal follow-up to ${phone}:`, e);
                     }
-                    continue;
                 }
             }
+            if (deferredFollowupHandled) continue;
 
-            const daysOverdue = diffLimaDays(endDate, todayStr);
-            if (![1, 7].includes(daysOverdue)) continue;
-            if (Number(member.lastOverdueReminderDay) === daysOverdue) continue;
+            const stage = getOverdueReminderStage(member, todayStr);
+            if (stage === null) continue;
+            if (member.lastOverdueReminderEndDate === endDate && Number(member.lastOverdueReminderDay) === stage) continue;
 
-            const msg = daysOverdue === 1
+            const msg = stage === 1
                 ? `¡Hola ${name}! 😊 Te recordamos que tu membresía venció ayer. ¿Deseas renovarla para seguir entrenando en MegaGym?`
                 : `¡Hola ${name}! 😊 Te escribo para confirmar si deseas renovar tu membresía de MegaGym. Si quieres continuar, puedo ayudarte por aquí 💪`;
+            const deliveryId = buildReminderDeliveryId(doc.id, 'overdue', endDate, stage);
 
             try {
-                await twilioClient.messages.create({ from: FROM, to: `whatsapp:${phone}`, body: msg });
-                await db.collection('messages').add({
-                    phone,
-                    content: msg,
-                    direction: 'outbound',
-                    timestamp: adminInner.firestore.FieldValue.serverTimestamp(),
-                    source: 'scheduled_overdue_membership_reminder'
+                const sent = await sendScheduledReminder({
+                    db, adminInner, twilioClient, from: FROM, phone, content: msg,
+                    source: 'scheduled_overdue_membership_reminder', deliveryId,
+                    memberId: doc.id, memberRef: doc.ref, membershipCycle: endDate, stage,
+                    isStillEligible: (freshMember: any) => String(freshMember.phone || '').trim() === phone
+                        && String(freshMember.endDate || '') === endDate
+                        && getOverdueReminderStage(freshMember, todayStr) === stage
                 });
-                await doc.ref.set({
-                    lastOverdueReminderDay: daysOverdue,
-                    lastOverdueReminderAt: adminInner.firestore.FieldValue.serverTimestamp()
-                }, { merge: true });
-                console.log(`Overdue reminder sent to ${phone} (day ${daysOverdue})`);
+                if (sent) {
+                    await doc.ref.set({
+                        lastOverdueReminderDay: stage,
+                        lastOverdueReminderEndDate: endDate,
+                        lastOverdueReminderAt: adminInner.firestore.FieldValue.serverTimestamp()
+                    }, { merge: true });
+                    console.log(`Overdue reminder sent to ${phone} (day ${stage})`);
+                }
             } catch (e) {
                 console.error(`Error sending overdue reminder to ${phone}:`, e);
             }
         }
 
-        const debtSnap = await db.collection('members').where('debt', '>', 0).get();
-
-        for (const doc of debtSnap.docs) {
+        // Weekly debt reminder, only while the membership is active or recently overdue.
+        for (const doc of membersSnap.docs) {
             const member = doc.data();
-            const phone = member.phone;
-            if (!phone || !member.startDate) continue;
-            if ((member.status || '') === 'inactive') continue;
-
-            const diffDays = diffLimaDays(member.startDate, todayStr);
-
-            if (diffDays <= 0 || diffDays % 7 !== 0) continue;
+            const phone = String(member.phone || '').trim();
+            const startDate = String(member.startDate || '');
+            const week = getDebtReminderWeek(member, todayStr);
+            if (!phone || !startDate || week === null) continue;
 
             const name = (member.name || 'amigo').split(' ')[0];
             const debt = Number(member.debt).toFixed(2);
             const msg = `¡Hola ${name}! 😊 Te recuerdo que tienes un saldo pendiente de S/ ${debt} en MegaGym. Cuando puedas lo coordinas con nosotros 💪`;
+            const deliveryId = buildReminderDeliveryId(doc.id, 'debt', startDate, `week-${week}`);
 
             try {
-                await twilioClient.messages.create({ from: FROM, to: `whatsapp:${phone}`, body: msg });
-                await db.collection('messages').add({
-                    phone,
-                    content: msg,
-                    direction: 'outbound',
-                    timestamp: adminInner.firestore.FieldValue.serverTimestamp(),
-                    source: 'scheduled_debt_reminder'
+                const sent = await sendScheduledReminder({
+                    db, adminInner, twilioClient, from: FROM, phone, content: msg,
+                    source: 'scheduled_debt_reminder', deliveryId,
+                    memberId: doc.id, memberRef: doc.ref, membershipCycle: startDate, stage: `week-${week}`,
+                    isStillEligible: (freshMember: any) => String(freshMember.phone || '').trim() === phone
+                        && String(freshMember.startDate || '') === startDate
+                        && getDebtReminderWeek(freshMember, todayStr) === week
                 });
-                console.log(`Debt reminder sent to ${phone} (day ${diffDays})`);
+                if (sent) console.log(`Debt reminder sent to ${phone} (week ${week})`);
             } catch (e) {
                 console.error(`Error sending debt reminder to ${phone}:`, e);
             }
@@ -1197,11 +1463,8 @@ export const getVoiceContext = functions
             let daysUntilExpiry: number | null = null;
             let daysOverdue: number | null = null;
             if (member.endDate) {
-                const end = new Date(member.endDate);
-                const today = new Date();
-                today.setHours(0, 0, 0, 0);
-                daysUntilExpiry = Math.ceil((end.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-                if (daysUntilExpiry < 0) daysOverdue = Math.abs(daysUntilExpiry);
+                daysUntilExpiry = diffDateOnlyDays(getLimaDateString(), member.endDate);
+                if (daysUntilExpiry !== null && daysUntilExpiry < 0) daysOverdue = Math.abs(daysUntilExpiry);
             }
             const eligible = member.status !== 'inactive'
                 && (daysOverdue === null || daysOverdue < 15);

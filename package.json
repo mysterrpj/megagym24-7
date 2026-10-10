@@ -5,6 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:emulator": "vite --mode emulator --host 127.0.0.1",
+    "emulators": "firebase emulators:start --project demo-megagym --only auth,firestore,functions",
+    "emulators:seed": "node scripts/seed-emulator.mjs",
+    "test:reservations": "npm --prefix functions run build && node --test --test-isolation=none functions/tests/classReservations.test.js",
+    "test:reminders": "npm --prefix functions run test:reminders",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"

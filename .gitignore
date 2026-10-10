@@ -32,3 +32,10 @@ yarn-error.log*
 firebase-debug.log
 functions/node_modules/
 functions/lib/
+
+# Entorno local de pruebas (JRE portátil para los emuladores)
+.tools/
+
+# Manifiesto generado por la CLI. Si queda versionado, firebase-tools lo usa como
+# especificación y deja de detectar funciones nuevas durante el despliegue.
+functions/functions.yaml
