@@ -56,6 +56,8 @@ interface ClassReservationDialogProps {
     occurrenceDate: string;
     bookings: ReservationBooking[];
     members: ReservationMember[];
+    initialSpot?: number | null;
+    backLabel?: string;
     readOnly?: boolean;
     onClose: () => void;
 }
@@ -83,7 +85,7 @@ function normalizePhone(phone: string) {
 
 function buildSeatAssignments(bookings: ReservationBooking[]) {
     const assignments = new Map<number, ReservationBooking>();
-    bookings.filter((booking) => booking.status !== 'cancelled').forEach((booking) => {
+    bookings.filter((booking) => !['cancelled', 'canceled'].includes(booking.status || '')).forEach((booking) => {
         const spot = Number(booking.spotNumber);
         if (Number.isInteger(spot) && spot >= 1 && spot <= ROOM_CAPACITY && !assignments.has(spot)) {
             assignments.set(spot, booking);
@@ -97,10 +99,12 @@ export function ClassReservationDialog({
     occurrenceDate,
     bookings,
     members,
+    initialSpot = null,
+    backLabel = '← Datos de clase',
     readOnly = false,
     onClose,
 }: ClassReservationDialogProps) {
-    const [selectedSpot, setSelectedSpot] = useState<number | null>(null);
+    const [selectedSpot, setSelectedSpot] = useState<number | null>(initialSpot);
     const [memberSearch, setMemberSearch] = useState('');
     const [selectedMemberId, setSelectedMemberId] = useState('');
     const [externalName, setExternalName] = useState('');
@@ -113,17 +117,21 @@ export function ClassReservationDialog({
     const effectiveCapacity = Math.min(ROOM_CAPACITY, Math.max(1, classItem.capacity || ROOM_CAPACITY));
 
     useEffect(() => {
+        setSelectedSpot(initialSpot);
+    }, [initialSpot, occurrenceDate, classItem.id]);
+
+    useEffect(() => {
         const handleKeyDown = (event: KeyboardEvent) => {
-            if (event.key === 'Escape') onClose();
+            if (event.key === 'Escape' && !saving) onClose();
         };
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [onClose]);
+    }, [onClose, saving]);
 
     const relevantBookings = useMemo(
         () => bookings.filter((booking) =>
             booking.classId === classItem.id
-            && booking.status !== 'cancelled'
+            && !['cancelled', 'canceled'].includes(booking.status || '')
             && (!booking.date || booking.date === occurrenceDate)
         ),
         [bookings, classItem.id, occurrenceDate]
@@ -259,7 +267,7 @@ export function ClassReservationDialog({
     };
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-3 sm:p-6" onClick={onClose}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-3 sm:p-6" onClick={() => { if (!saving) onClose(); }}>
             <div
                 role="dialog"
                 aria-modal="true"
@@ -281,10 +289,11 @@ export function ClassReservationDialog({
                     <button
                         type="button"
                         onClick={onClose}
-                        className="rounded-lg p-2 text-neutral-400 transition-colors hover:bg-white/5 hover:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                        aria-label="Volver a datos de la clase"
+                        disabled={saving}
+                        className="rounded-lg p-2 text-neutral-400 transition-colors hover:bg-white/5 hover:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-50"
+                        aria-label={backLabel.replace('← ', '')}
                     >
-                        <span className="text-xs">← Datos de clase</span>
+                        <span className="text-xs">{backLabel}</span>
                     </button>
                 </header>
 
@@ -438,13 +447,13 @@ export function ClassReservationDialog({
                                     <Button
                                         type="button"
                                         onClick={() => handleUpdateBooking(selectedBooking, { checkedIn: !selectedBooking.checkedIn })}
-                                        disabled={readOnly || saving}
+                                        disabled={readOnly || saving || selectedBooking.status !== 'confirmed' || !['paid', 'membership'].includes(selectedBooking.paymentStatus || '')}
                                         className={selectedBooking.checkedIn
                                             ? 'w-full border border-blue-400/25 bg-blue-400/10 text-blue-200 hover:bg-blue-400/15'
                                             : 'w-full bg-blue-600 text-white hover:bg-blue-500'}
                                     >
                                         <CheckCircle2 className="mr-2 h-4 w-4" />
-                                        {selectedBooking.checkedIn ? 'Deshacer asistencia' : 'Marcar llegada'}
+                                        {selectedBooking.checkedIn ? 'Deshacer asistencia' : selectedBooking.status !== 'confirmed' ? 'Confirma el pago antes de marcar llegada' : 'Marcar llegada'}
                                     </Button>
                                     {(!selectedBooking.paymentStatus || selectedBooking.paymentStatus === 'pending') && (
                                         <Button
