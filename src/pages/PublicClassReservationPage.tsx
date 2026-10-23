@@ -8,14 +8,32 @@ import {
     DoorOpen,
     Hash,
     Loader2,
+    MessageCircle,
     RefreshCw,
     Smartphone,
     UserRound,
     X,
 } from 'lucide-react';
-import { PublicReceipt, PublicSchedule, PublicSession, reservationCall, reservationError } from '@/lib/classReservations';
+import { ClassPaymentQuote, PublicReceipt, PublicSchedule, PublicSession, reservationCall, reservationError } from '@/lib/classReservations';
 
-interface SavedReservation { bookingId: string; accessToken: string }
+interface SavedReservation {
+    bookingId: string;
+    accessToken: string;
+    verifierToken?: string;
+    whatsappPhone?: string;
+    collectorName?: string;
+    notification?: {
+        memberName: string;
+        className: string;
+        date: string;
+        time: string;
+        spotNumber: number;
+        amount: number;
+        paymentMethod: string;
+        operationCode: string;
+        collectorName: string;
+    };
+}
 
 const field = 'h-11 w-full rounded-lg border border-neutral-300 bg-white px-10 text-sm text-neutral-950 placeholder:text-neutral-400 focus:border-lime-500 focus:outline-none focus:ring-2 focus:ring-lime-500/20';
 
@@ -57,8 +75,9 @@ export function PublicClassReservationPage() {
     const [selected, setSelected] = useState<number | null>(null);
     const [name, setName] = useState('');
     const [phone, setPhone] = useState('');
-    const [method, setMethod] = useState<'Yape' | 'Plin'>('Yape');
     const [operationCode, setOperationCode] = useState('');
+    const [paymentQuote, setPaymentQuote] = useState<ClassPaymentQuote | null>(null);
+    const [quoteLoading, setQuoteLoading] = useState(false);
     const [accepted, setAccepted] = useState(false);
     const [saved, setSaved] = useState<SavedReservation | null>(null);
     const [receipt, setReceipt] = useState<PublicReceipt | null>(null);
@@ -69,8 +88,8 @@ export function PublicClassReservationPage() {
     const submitting = useRef(false);
     const sessionSequence = useRef(0);
     const scheduleSequence = useRef(0);
+    const quoteSequence = useRef(0);
     const receiptSequence = useRef(0);
-    const previousReceiptSignature = useRef('');
     const currentRouteKey = useRef(routeKey);
     currentRouteKey.current = routeKey;
 
@@ -114,11 +133,13 @@ export function PublicClassReservationPage() {
 
     useEffect(() => {
         ++sessionSequence.current;
+        ++quoteSequence.current;
         ++receiptSequence.current;
-        previousReceiptSignature.current = '';
         submitting.current = false;
         request.current = { payload: '', id: '' };
         setBusy(false);
+        setQuoteLoading(false);
+        setPaymentQuote(null);
         setSession(null); setSelected(null); setReceipt(null); setSaved(null); setReceiptOpen(false); setReceiptLoading(false); setReceiptError(''); setLoading(true);
         try {
             const raw = localStorage.getItem(storageKey);
@@ -157,34 +178,41 @@ export function PublicClassReservationPage() {
         return () => { ++receiptSequence.current; window.clearInterval(interval); };
     }, [saved, refreshReceipt]);
 
-    useEffect(() => {
-        if (!receipt) return;
-        const signature = `${receipt.bookingId}:${receipt.status}:${receipt.paymentStatus}`;
-        if (previousReceiptSignature.current !== signature) {
-            previousReceiptSignature.current = signature;
-            setReceiptOpen(true);
+    const loadPaymentQuote = async (spotNumber: number) => {
+        const sequence = ++quoteSequence.current;
+        const quoteRoute = routeKey;
+        setQuoteLoading(true);
+        setPaymentQuote(null);
+        setError('');
+        try {
+            const quote = await reservationCall<ClassPaymentQuote>('createClassPaymentQuote', { classId, date, spotNumber });
+            if (sequence === quoteSequence.current && currentRouteKey.current === quoteRoute) setPaymentQuote(quote);
+        } catch (cause) {
+            if (sequence === quoteSequence.current && currentRouteKey.current === quoteRoute) setError(reservationError(cause));
+        } finally {
+            if (sequence === quoteSequence.current && currentRouteKey.current === quoteRoute) setQuoteLoading(false);
         }
-    }, [receipt]);
+    };
 
     const submit = async (event: React.FormEvent) => {
         event.preventDefault();
-        if (!selected || !session?.bookingOpen || !accepted || submitting.current) return;
+        if (!selected || !session?.bookingOpen || !paymentQuote || !accepted || submitting.current) return;
         const mutationRoute = routeKey;
         submitting.current = true; setBusy(true); setError('');
-        const data = { classId, date, spotNumber: selected, name: name.trim(), phone: phone.trim(), paymentMethod: method, operationCode: operationCode.trim() };
+        const data = { classId, date, spotNumber: selected, name: name.trim(), phone: phone.trim(), paymentMethod: 'Yape' as const, operationCode: operationCode.trim(), quoteId: paymentQuote.quoteId, quoteToken: paymentQuote.quoteToken };
         const payload = JSON.stringify(data);
         try {
             if (request.current.payload !== payload) request.current = { payload, id: createRequestId() };
             const result = await reservationCall<SavedReservation>('createPublicClassReservation', { ...data, requestId: request.current.id });
             if (currentRouteKey.current !== mutationRoute) return;
             ++receiptSequence.current;
-            previousReceiptSignature.current = '';
             setReceipt(null);
             setReceiptError('');
             setReceiptOpen(true);
             setSelected(null);
-            setSaved(result);
-            try { localStorage.setItem(storageKey, JSON.stringify({ bookingId: result.bookingId, accessToken: result.accessToken })); } catch { /* Receipt remains in memory. */ }
+            const savedResult: SavedReservation = result;
+            setSaved(savedResult);
+            try { localStorage.setItem(storageKey, JSON.stringify(savedResult)); } catch { /* Receipt remains in memory. */ }
             await refresh();
         } catch (cause) {
             if (currentRouteKey.current === mutationRoute) setError(reservationError(cause));
@@ -216,6 +244,7 @@ export function PublicClassReservationPage() {
     const selectSeat = (spotNumber: number) => {
         setError('');
         setSelected(spotNumber);
+        void loadPaymentQuote(spotNumber);
     };
     const showReceipt = () => {
         setReceiptOpen(true);
@@ -224,7 +253,6 @@ export function PublicClassReservationPage() {
     const forgetReservation = () => {
         ++receiptSequence.current;
         try { localStorage.removeItem(storageKey); } catch { /* Local storage is optional. */ }
-        previousReceiptSignature.current = '';
         request.current = { payload: '', id: '' };
         setSaved(null);
         setReceipt(null);
@@ -232,6 +260,24 @@ export function PublicClassReservationPage() {
         setReceiptLoading(false);
         setReceiptOpen(false);
         setSelected(null);
+    };
+
+    const notifyCollector = () => {
+        if (!saved?.verifierToken || !saved.whatsappPhone || !saved.notification) return;
+        const details = saved.notification;
+        const verificationUrl = `${window.location.origin}/confirmar-pago/${encodeURIComponent(saved.bookingId)}?token=${encodeURIComponent(saved.verifierToken)}`;
+        const message = [
+            '🟡 Nueva reserva pendiente',
+            `Cliente: ${details.memberName}`,
+            `${details.className} — ${details.date} — ${details.time}`,
+            `Lugar ${String(details.spotNumber).padStart(2, '0')} — ${details.paymentMethod} S/ ${Number(details.amount).toFixed(2)}`,
+            `Operación: ${details.operationCode}`,
+            '',
+            'Revisa tu Yape antes de confirmar:',
+            verificationUrl,
+        ].join('\n');
+        const phoneDigits = saved.whatsappPhone.replace(/\D/g, '');
+        window.open(`https://wa.me/${phoneDigits}?text=${encodeURIComponent(message)}`, '_blank', 'noopener,noreferrer');
     };
 
     const openSession = (nextClassId: string, nextDate: string) => {
@@ -246,6 +292,8 @@ export function PublicClassReservationPage() {
 
     const confirmed = receipt?.paymentStatus === 'paid' && receipt.status !== 'cancelled';
     const cancelled = receipt?.status === 'cancelled';
+    const ownSpot = !cancelled ? (saved?.notification?.spotNumber ?? receipt?.spotNumber ?? null) : null;
+    const ownFirstName = saved?.notification?.memberName?.trim().split(/\s+/)[0] || '';
     const dateLabel = /^\d{4}-\d{2}-\d{2}$/.test(date)
         ? new Date(`${date}T12:00:00-05:00`).toLocaleDateString('es-PE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'America/Lima' }) : date;
     const availableCount = session?.seats.filter((seat) => seat.status === 'available').length ?? 0;
@@ -322,40 +370,45 @@ export function PublicClassReservationPage() {
                         <div className="col-start-4 col-span-6 row-start-1 flex h-10 self-center items-center justify-center border border-amber-200/70 bg-neutral-950 text-xs font-black uppercase tracking-[0.18em] text-amber-100 shadow-[0_6px_0_rgba(0,0,0,0.45)]">Tarima</div>
                         {session.seats.slice(0, 21).map((seat) => {
                             const available = seat.status === 'available';
+                            const pending = seat.status === 'pending';
+                            const confirmedSeat = seat.status === 'reserved';
                             const active = selected === seat.spotNumber;
-                            const occupied = seat.status === 'pending' || seat.status === 'reserved';
+                            const ownSeat = ownSpot === seat.spotNumber && Boolean(ownFirstName);
                             return <button
                                 key={seat.spotNumber}
                                 type="button"
                                 disabled={!available || !session.bookingOpen || busy || Boolean(saved && !cancelled)}
                                 onClick={() => selectSeat(seat.spotNumber)}
                                 aria-pressed={active}
-                                aria-label={`Lugar ${seat.spotNumber}, ${available ? 'disponible' : occupied ? 'ocupado' : 'no habilitado'}`}
-                                className={`${seatPlacement[seat.spotNumber] || ''} min-h-11 self-center rounded-lg border text-base font-black tabular-nums transition-all focus:outline-none focus:ring-2 focus:ring-amber-300 focus:ring-offset-2 focus:ring-offset-[#121411] ${active
-                                    ? 'scale-105 border-amber-200 bg-amber-300 text-neutral-950 shadow-[0_0_14px_rgba(252,211,77,0.4)]'
+                                aria-label={`${ownSeat ? `${ownFirstName}, tu lugar ${seat.spotNumber}` : `Lugar ${seat.spotNumber}`}, ${available ? 'disponible' : pending ? 'pago por verificar' : confirmedSeat ? 'confirmado' : 'no habilitado'}`}
+                                className={`${seatPlacement[seat.spotNumber] || ''} min-h-11 self-center rounded-lg border text-base font-black tabular-nums transition-all focus:outline-none focus:ring-2 focus:ring-yellow-200 focus:ring-offset-2 focus:ring-offset-[#121411] ${active
+                                    ? 'scale-105 border-yellow-100 bg-yellow-200 text-yellow-950 shadow-[0_0_16px_rgba(254,240,138,0.55)] ring-2 ring-yellow-100'
                                     : available
                                         ? 'border-lime-200 bg-lime-300 text-lime-950 hover:bg-lime-200'
-                                        : occupied
-                                            ? 'border-neutral-400 bg-neutral-300 text-neutral-600'
-                                            : 'border-neutral-700 bg-neutral-800 text-neutral-600'
+                                        : pending
+                                            ? 'border-orange-200 bg-orange-400 text-orange-950 shadow-[0_0_10px_rgba(251,146,60,0.2)]'
+                                            : confirmedSeat
+                                                ? 'border-neutral-400 bg-neutral-300 text-neutral-700'
+                                                : 'border-neutral-700 bg-neutral-800 text-neutral-600'
                                 } disabled:cursor-not-allowed`}
-                            >{String(seat.spotNumber).padStart(2, '0')}</button>;
+                            ><span className={ownSeat ? 'block truncate px-1 text-xs font-black capitalize' : ''}>{ownSeat ? ownFirstName : String(seat.spotNumber).padStart(2, '0')}</span></button>;
                         })}
                     </div>
 
                     <div className="shrink-0">
                         <div className="mx-auto flex h-7 w-36 items-center justify-center border border-white/10 bg-neutral-800 text-[10px] font-black uppercase tracking-widest text-neutral-300" style={{ clipPath: 'polygon(12% 0, 88% 0, 100% 100%, 0 100%)' }}><DoorOpen className="mr-1.5 h-3.5 w-3.5" />Entrada</div>
-                        <div className="mt-2 flex items-center justify-center gap-4 text-[10px] font-medium text-neutral-300">
+                        <div className="mt-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[10px] font-medium text-neutral-300">
                             <span className="flex items-center gap-1.5"><i className="h-3 w-3 rounded-sm bg-lime-300" />Disponible</span>
-                            <span className="flex items-center gap-1.5"><i className="h-3 w-3 rounded-sm bg-neutral-300" />Ocupado</span>
-                            <span className="flex items-center gap-1.5"><i className="h-3 w-3 rounded-sm bg-amber-300" />Seleccionado</span>
+                            <span className="flex items-center gap-1.5"><i className="h-3 w-3 rounded-sm bg-orange-400" />Por verificar</span>
+                            <span className="flex items-center gap-1.5"><i className="h-3 w-3 rounded-sm bg-neutral-300" />Confirmado</span>
+                            <span className="flex items-center gap-1.5"><i className="h-3 w-3 rounded-sm bg-yellow-200 ring-1 ring-yellow-100" />Seleccionado</span>
                         </div>
                     </div>
                 </section>
 
                 <footer className="flex h-9 shrink-0 items-center justify-between px-1 text-[11px] text-neutral-400">
                     {saved && !cancelled
-                        ? <><span className="truncate">Lugar {String(receipt?.spotNumber || selected || 0).padStart(2, '0')} · {confirmed ? 'Confirmado' : 'Pago por verificar'}</span><button type="button" onClick={showReceipt} className="ml-3 min-h-9 shrink-0 font-bold text-lime-300">Ver estado</button></>
+                        ? <><span className="truncate">{ownFirstName || `Lugar ${String(receipt?.spotNumber || ownSpot || selected || 0).padStart(2, '0')}`} · {confirmed ? 'Confirmado' : 'Pago por verificar'}</span><button type="button" onClick={showReceipt} className="ml-3 min-h-9 shrink-0 font-bold text-lime-300">Ver estado</button></>
                         : !session.bookingOpen
                             ? <span className="font-semibold text-amber-300">Reservas cerradas para este horario</span>
                             : <><span>{availableCount} lugares disponibles</span><span>Elige uno para continuar</span></>}
@@ -368,7 +421,7 @@ export function PublicClassReservationPage() {
                 </div>
             )}
 
-            <Dialog.Root open={paymentSheetOpen} onOpenChange={(open) => { if (!open && !busy) setSelected(null); }}>
+            <Dialog.Root open={paymentSheetOpen} onOpenChange={(open) => { if (!open && !busy) { ++quoteSequence.current; setSelected(null); setPaymentQuote(null); setQuoteLoading(false); setError(''); } }}>
                 <Dialog.Portal>
                     <Dialog.Overlay className="fixed inset-0 z-50 bg-black/70" />
                     <Dialog.Content
@@ -382,37 +435,42 @@ export function PublicClassReservationPage() {
                         <div className="sticky top-0 z-10 -mx-1 flex items-start justify-between gap-3 bg-neutral-100 px-1 pb-2 pt-1">
                             <div>
                                 <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Completa tu reserva</p>
-                                <Dialog.Title className="text-xl font-black">Lugar {String(selected).padStart(2, '0')} <span className="text-neutral-400">·</span> S/ {session.classItem.price.toFixed(2)}</Dialog.Title>
+                                <Dialog.Title className="text-xl font-black">Lugar {String(selected).padStart(2, '0')} {paymentQuote && <><span className="text-neutral-400">·</span> S/ {paymentQuote.amount.toFixed(2)}</>}</Dialog.Title>
                             </div>
                             <Dialog.Close disabled={busy} aria-label="Cerrar" className="grid h-10 w-10 place-items-center rounded-full text-neutral-600 hover:bg-neutral-200 disabled:opacity-40"><X className="h-5 w-5" /></Dialog.Close>
                         </div>
-                        <Dialog.Description className="sr-only">Ingresa tus datos y el código de tu pago para solicitar el lugar seleccionado.</Dialog.Description>
+                        <Dialog.Description className="sr-only">Consulta los datos vigentes de pago, ingresa tus datos y solicita el lugar seleccionado.</Dialog.Description>
 
-                        <form onSubmit={submit} className="space-y-2.5">
+                        {quoteLoading && <div role="status" className="flex items-center justify-center gap-3 py-12 text-sm font-semibold text-neutral-600"><Loader2 className="h-5 w-5 animate-spin text-emerald-600" />Confirmando los datos de pago…</div>}
+
+                        {!quoteLoading && !paymentQuote && <div className="py-6 text-center">
+                            <p role="alert" className="text-sm leading-6 text-rose-700">{error || 'No pudimos preparar los datos de pago.'}</p>
+                            <button type="button" onClick={() => { if (selected) void loadPaymentQuote(selected); }} className="mt-4 inline-flex h-11 items-center gap-2 rounded-lg border border-neutral-300 bg-white px-4 text-sm font-bold"><RefreshCw className="h-4 w-4" />Reintentar</button>
+                        </div>}
+
+                        {!quoteLoading && paymentQuote && <form onSubmit={submit} className="space-y-2.5">
                             <label className="relative block"><span className="sr-only">Nombre completo</span><UserRound className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-neutral-500" /><input autoComplete="name" required minLength={3} maxLength={100} placeholder="Nombre completo" value={name} onChange={(event) => setName(event.target.value)} className={field} /></label>
                             <label className="relative block"><span className="sr-only">Celular de Perú</span><Smartphone className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-neutral-500" /><input autoComplete="tel" inputMode="tel" required pattern="(?:\+?51[ -]?)?9[0-9 -]{8,12}" maxLength={16} placeholder="Celular de Perú" value={phone} onChange={(event) => setPhone(event.target.value)} className={field} /></label>
 
                             <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs">
-                                <div className="flex items-center justify-between gap-3"><p className="font-bold text-emerald-950">Paga S/ {session.classItem.price.toFixed(2)}</p><span className="shrink-0 text-[10px] font-semibold text-emerald-700">Verificación manual</span></div>
-                                <p className="mt-1 whitespace-pre-wrap break-words text-emerald-800">{session.classItem.paymentInstructions}</p>
-                                <p className="mt-1.5 text-[10px] leading-4 text-amber-800">Elegir un lugar no lo aparta. Se reserva al enviar; si otra persona se adelanta, no pagues dos veces.</p>
+                                <div className="flex items-center justify-between gap-3"><p className="font-bold text-emerald-950">Paga por Yape S/ {paymentQuote.amount.toFixed(2)}</p><span className="shrink-0 text-[10px] font-semibold text-emerald-700">Verificación manual</span></div>
+                                <p className="mt-1 whitespace-pre-wrap break-words text-emerald-800">{paymentQuote.paymentInstructions}</p>
+                                <p className="mt-1.5 text-[10px] leading-4 text-amber-800">Estos datos quedan asociados a esta solicitud hasta el inicio de la clase. Elegir el lugar todavía no lo aparta; no pagues dos veces.</p>
                             </div>
 
-                            <fieldset><legend className="sr-only">Método de pago utilizado</legend><div className="grid grid-cols-2 gap-2">{(['Yape', 'Plin'] as const).map((value) => <label key={value} className={`flex h-11 cursor-pointer items-center justify-center gap-2 rounded-lg border text-sm font-bold transition-colors focus-within:ring-2 focus-within:ring-emerald-500 focus-within:ring-offset-1 ${method === value ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-neutral-300 bg-white text-neutral-700'}`}><input type="radio" name="method" value={value} checked={method === value} onChange={() => setMethod(value)} className="sr-only" /><span className={`grid h-4 w-4 place-items-center rounded-full border ${method === value ? 'border-white' : 'border-neutral-400'}`}>{method === value && <i className="h-2 w-2 rounded-full bg-white" />}</span>{value}</label>)}</div></fieldset>
-
-                            <label className="relative block"><span className="sr-only">Código de operación</span><Hash className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-neutral-500" /><input required minLength={4} maxLength={40} pattern="[A-Za-z0-9-]+" autoCapitalize="characters" autoComplete="off" placeholder="Código de operación" title="Usa solo letras, números y guiones" value={operationCode} onChange={(event) => setOperationCode(event.target.value)} className={field} /></label>
+                            <label className="relative block"><span className="sr-only">Código de operación de Yape</span><Hash className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-neutral-500" /><input required minLength={4} maxLength={40} pattern="[A-Za-z0-9-]+" autoCapitalize="characters" autoComplete="off" placeholder="Código de operación de Yape" title="Usa solo letras, números y guiones" value={operationCode} onChange={(event) => setOperationCode(event.target.value)} className={field} /></label>
 
                             {error && <p role="alert" className="rounded-md bg-rose-50 px-3 py-2 text-xs text-rose-700">{error}</p>}
 
-                            <label className="flex cursor-pointer items-start gap-2 text-[11px] leading-4 text-neutral-600"><input type="checkbox" required checked={accepted} onChange={(event) => setAccepted(event.target.checked)} className="mt-0.5 h-4 w-4 accent-emerald-600" /><span>Autorizo usar mis datos para gestionar esta reserva y entiendo que el pago será verificado por recepción.</span></label>
+                            <label className="flex cursor-pointer items-start gap-2 text-[11px] leading-4 text-neutral-600"><input type="checkbox" required checked={accepted} onChange={(event) => setAccepted(event.target.checked)} className="mt-0.5 h-4 w-4 accent-emerald-600" /><span>Autorizo usar mis datos para gestionar esta reserva y entiendo que el pago será verificado por la persona encargada.</span></label>
 
                             <button disabled={!selected || !session.bookingOpen || !accepted || busy} className="sticky bottom-0 flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-emerald-500 text-sm font-black uppercase tracking-wide text-neutral-950 transition-colors hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-40">{busy && <Loader2 className="h-4 w-4 animate-spin" />}Reservar lugar {String(selected).padStart(2, '0')}</button>
-                        </form>
+                        </form>}
                     </Dialog.Content>
                 </Dialog.Portal>
             </Dialog.Root>
 
-            <Dialog.Root open={Boolean(saved && (!receipt || receiptOpen))} onOpenChange={(open) => { if (!open && receipt && !busy) setReceiptOpen(false); }}>
+            <Dialog.Root open={Boolean(saved && receiptOpen)} onOpenChange={(open) => { if (!open && receipt && !busy) setReceiptOpen(false); }}>
                 <Dialog.Portal>
                     <Dialog.Overlay className="fixed inset-0 z-[60] bg-black/75" />
                     <Dialog.Content
@@ -441,7 +499,9 @@ export function PublicClassReservationPage() {
                             <Dialog.Title className="mt-3 text-xl font-black">{cancelled ? 'Solicitud cancelada' : confirmed ? 'Reserva confirmada' : 'Reserva recibida'}</Dialog.Title>
                             <Dialog.Description className="mt-2 text-sm text-neutral-600">{cancelled ? 'El lugar fue liberado.' : confirmed ? `Lugar ${String(receipt.spotNumber).padStart(2, '0')} confirmado. Te esperamos.` : `Lugar ${String(receipt.spotNumber).padStart(2, '0')} pendiente de verificación de pago.`}</Dialog.Description>
                             <p className="mt-2 text-xs font-medium text-neutral-600">{receipt.className} · {receipt.date} · {receipt.time} (hora de Perú)</p>
-                            {!confirmed && !cancelled && <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">Esta pantalla no confirma el pago. Recepción debe verificar el código de operación.</p>}
+                            {!confirmed && !cancelled && <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">Esta pantalla no confirma el pago. {saved?.collectorName || 'La persona encargada'} debe revisar su Yape antes de confirmarlo.</p>}
+                            {!confirmed && !cancelled && saved?.verifierToken && saved.whatsappPhone && saved.notification && <button type="button" onClick={notifyCollector} className="mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-[#25D366] text-sm font-black text-neutral-950 hover:bg-[#20bd5a]"><MessageCircle className="h-5 w-5" />Avisar por WhatsApp</button>}
+                            {!confirmed && !cancelled && saved?.verifierToken && saved.whatsappPhone && saved.notification && <p className="mt-1.5 text-[11px] leading-4 text-neutral-500">Se abrirá WhatsApp con el mensaje listo. Solo falta presionar Enviar.</p>}
                             {receiptError && <p role="alert" className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-700">{receiptError}</p>}
                             <div className="mt-5 grid grid-cols-2 gap-2">
                                 <button type="button" onClick={() => void refreshReceipt()} disabled={busy || receiptLoading} className="h-11 rounded-lg border border-neutral-300 text-sm font-bold text-neutral-700 disabled:opacity-50">{receiptLoading ? <Loader2 className="mr-1.5 inline h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 inline h-3.5 w-3.5" />}Actualizar</button>

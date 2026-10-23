@@ -6,6 +6,7 @@ import { AlertTriangle, CalendarClock, ChevronLeft, ChevronRight, Clock3, MapPin
 import { db } from '@/lib/firebase';
 import { ClassReservationDialog, type ReservationBooking, type ReservationMember } from '@/components/classes/ClassReservationDialog';
 import { ClassAdminDialog, classDays, type AdminClass } from '@/components/classes/ClassAdminDialog';
+import { ClassPaymentSettingsCard } from '@/components/classes/ClassPaymentSettingsCard';
 import { Button } from '@/components/ui/button';
 
 interface ClassDoc extends AdminClass { color: string }
@@ -177,6 +178,8 @@ export function ClassesPage() {
             <div><h1 className="text-3xl font-bold text-white">Clases</h1><p className="mt-1 text-sm text-neutral-400">Pagos pendientes, próximas clases y reservas por fecha en un mismo lugar.</p></div>
             <Button disabled={!ready || usingDemoData} onClick={() => setShowCreateModal(true)} className="bg-green-600 hover:bg-green-700"><Plus className="mr-2 h-4 w-4" />Nueva clase</Button>
         </div>
+
+        {!usingDemoData && <ClassPaymentSettingsCard />}
 
         {Object.keys(errors).length > 0 && <div role="alert" className="space-y-2 rounded-lg border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-300">{Object.entries(errors).map(([key, message]) => <p key={key}>{message}</p>)}<p>No se muestran datos de demostración como sustituto de un error.</p><Button variant="outline" onClick={() => setRetry((value) => value + 1)}>Reintentar</Button></div>}
         {!ready && !Object.keys(errors).length && <p role="status" className="text-sm text-neutral-400">Cargando clases y reservas…</p>}

@@ -108,6 +108,66 @@ test('tokens are hash-verified and generation replacement revokes prior credenti
     assert.equal(api.validReservationToken(b, null), false);
     assert.equal(api.validReservationToken(b, token.toUpperCase()), false);
 });
+test('payment settings normalize phones, enforce six digit PINs, hash, and preserve an existing PIN', () => {
+    const settings = api.validateClassPaymentSettings({
+        collectorName: '  María Caja  ', yapePhone: '987 654 321', whatsappPhone: '+51 912-345-678', sameNumber: false, pin: '123456'
+    });
+    assert.equal(settings.collectorName, 'María Caja');
+    assert.equal(settings.yapePhone, '+51987654321');
+    assert.equal(settings.whatsappPhone, '+51912345678');
+    assert.equal(settings.pinHash.length, 64);
+    assert.equal(settings.pinSalt.length, 32);
+    assert.equal(Object.values(settings).includes('123456'), false);
+    assert.equal(api.verifyClassPaymentPin('123456', settings.pinSalt, settings.pinHash), true);
+    assert.equal(api.verifyClassPaymentPin('654321', settings.pinSalt, settings.pinHash), false);
+    const preserved = api.validateClassPaymentSettings({ collectorName: 'Caja', yapePhone: '987654321', sameNumber: true }, settings);
+    assert.equal(preserved.whatsappPhone, '+51987654321');
+    assert.equal(preserved.pinHash, settings.pinHash);
+    assert.equal(preserved.pinSalt, settings.pinSalt);
+});
+test('payment settings reject malformed names, flags, phones, and non-six-digit PINs', () => {
+    const valid = { collectorName: 'Caja', yapePhone: '987654321', whatsappPhone: '912345678', sameNumber: false };
+    for (const pin of [undefined, '', '12345', '1234567', 123456, '12a456']) {
+        rejectsCode(() => api.validateClassPaymentSettings({ ...valid, pin }), 'invalid-argument');
+    }
+    rejectsCode(() => api.validateClassPaymentSettings({ ...valid, collectorName: 'x', pin: '123456' }), 'invalid-argument');
+    rejectsCode(() => api.validateClassPaymentSettings({ ...valid, sameNumber: 'false', pin: '123456' }), 'invalid-argument');
+    rejectsCode(() => api.validateClassPaymentSettings({ ...valid, yapePhone: '555123456', pin: '123456' }), 'invalid-argument');
+});
+test('payment verifier token is separate, hash checked, and expires strictly', () => {
+    const token = randomBytes(32).toString('hex');
+    const booking = { verifierTokenHash: createHash('sha256').update(token).digest('hex'), verifierTokenExpiresAt: now + 1000 };
+    assert.equal(api.validClassPaymentVerifierToken(booking, token, now), true);
+    assert.equal(api.validClassPaymentVerifierToken(booking, token, now + 1000), false);
+    assert.equal(api.validClassPaymentVerifierToken(booking, randomBytes(32).toString('hex'), now), false);
+    assert.equal(api.validClassPaymentVerifierToken({ ...booking, verifierTokenExpiresAt: { toMillis: () => now + 1000 } }, token, now), true);
+});
+test('immutable payment quotes bind token, class, date and spot until class-start expiry and remain single-use', () => {
+    const quoteToken = randomBytes(32).toString('hex');
+    const expected = { classId: 'fullbody', date: '2026-06-01', spotNumber: 7 };
+    const classStartsAt = Date.parse('2026-06-01T18:30:00-05:00');
+    const quote = { ...expected, quoteTokenHash: createHash('sha256').update(quoteToken).digest('hex'), expiresAt: classStartsAt,
+        amount: 6, paymentInstructions: 'Yape al número anterior' };
+    assert.equal(api.validClassPaymentQuote(quote, quoteToken, expected, now), true);
+    assert.equal(api.classPaymentQuoteHasVerifier(quote), false);
+    assert.equal(api.classPaymentQuoteHasVerifier({ ...quote, collectorName: 'Caja', yapePhone: '+51987654321',
+        whatsappPhone: '+51912345678', paymentPinHash: 'a'.repeat(64), paymentPinSalt: 'b'.repeat(32),
+        paymentSettingsGeneration: 'c'.repeat(32) }), true);
+    assert.equal(api.validClassPaymentQuote(quote, quoteToken, { ...expected, spotNumber: 8 }, now), false);
+    assert.equal(api.validClassPaymentQuote(quote, randomBytes(32).toString('hex'), expected, now), false);
+    assert.equal(api.validClassPaymentQuote({ ...quote, consumedBy: 'booking-1' }, quoteToken, expected, now), false);
+    assert.equal(api.validClassPaymentQuote(quote, quoteToken, expected, classStartsAt - 1), true);
+    assert.equal(api.validClassPaymentQuote(quote, quoteToken, expected, classStartsAt), false);
+});
+test('shared PIN failure window increments, caps globally, and resets after one hour', () => {
+    assert.deepEqual(api.nextClassPaymentPinFailure(undefined, now, 2), { allowed: true, windowStart: now, count: 1 });
+    assert.deepEqual(api.nextClassPaymentPinFailure({ windowStart: now - 10, count: 1 }, now, 2), { allowed: true, windowStart: now - 10, count: 2 });
+    assert.deepEqual(api.nextClassPaymentPinFailure({ windowStart: now - 10, count: 2 }, now, 2), { allowed: false, windowStart: now - 10, count: 2 });
+    assert.deepEqual(api.nextClassPaymentPinFailure({ windowStart: now - 3600000, count: 25 }, now, 25), { allowed: true, windowStart: now, count: 1 });
+    const config = { pinSalt: 'a'.repeat(32), pinHash: 'b'.repeat(64), settingsGeneration: 'c'.repeat(32) };
+    assert.equal(api.classPaymentSettingsGeneration(config), 'c'.repeat(32));
+    assert.match(api.classPaymentSettingsGeneration({ pinSalt: config.pinSalt, pinHash: config.pinHash }), /^[a-f0-9]{64}$/);
+});
 
 test('emulator: concurrent seats, duplicate phone/code, idempotency, ownership, review, reuse and admin auth', { skip: !process.env.FIRESTORE_EMULATOR_HOST }, async () => {
     const admin = require('firebase-admin');

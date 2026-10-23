@@ -15,11 +15,30 @@ export interface PublicScheduleClass {
 export interface PublicSchedule {
     days: Array<{ date: string; classes: PublicScheduleClass[] }>;
 }
+export interface PaymentCollector {
+    name: string;
+    yapePhone: string;
+}
+export interface ClassPaymentSettings {
+    configured: boolean;
+    collectorName: string;
+    yapePhone: string;
+    whatsappPhone: string;
+    sameNumber: boolean;
+    hasPin: boolean;
+}
 export interface PublicSession {
-    classItem: { id: string; name: string; instructor: string; time: string; duration: number; capacity: number; price: number; paymentInstructions: string };
+    classItem: { id: string; name: string; instructor: string; time: string; duration: number; capacity: number; price: number; paymentInstructions: string; paymentCollector?: PaymentCollector };
     date: string;
     seats: { spotNumber: number; status: 'available' | 'pending' | 'reserved' | 'blocked' }[];
     bookingOpen: boolean;
+}
+export interface ClassPaymentQuote {
+    quoteId: string;
+    quoteToken: string;
+    amount: number;
+    paymentInstructions: string;
+    paymentCollector?: PaymentCollector;
 }
 export interface PublicReceipt {
     bookingId: string;
@@ -29,6 +48,13 @@ export interface PublicReceipt {
     date: string;
     className: string;
     time: string;
+}
+export interface ClassPaymentVerification extends PublicReceipt {
+    memberName: string;
+    amount: number;
+    paymentMethod: string;
+    operationCode: string;
+    collectorName: string;
 }
 
 export async function reservationCall<T>(name: string, data: unknown): Promise<T> {

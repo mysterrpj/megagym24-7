@@ -17,6 +17,7 @@ import { RegisterPage } from '@/pages/RegisterPage';
 import { PublicPaymentPage } from '@/pages/PublicPaymentPage';
 import { PublicClassSchedulePage } from '@/pages/PublicClassSchedulePage';
 import { PublicClassReservationPage } from '@/pages/PublicClassReservationPage';
+import { PublicClassPaymentVerificationPage } from '@/pages/PublicClassPaymentVerificationPage';
 
 import { RequireAdmin, RequireAuth } from '@/lib/auth';
 import { MemberDashboard } from '@/pages/MemberDashboard';
@@ -31,6 +32,7 @@ function App() {
                 <Route path="/pagar" element={<PublicPaymentPage />} />
                 <Route path="/reservar" element={<PublicClassSchedulePage />} />
                 <Route path="/reservar/clase/:classId" element={<PublicClassReservationPage />} />
+                <Route path="/confirmar-pago/:bookingId" element={<PublicClassPaymentVerificationPage />} />
 
                 {/* Member Routes */}
                 <Route element={<RequireAuth />}>

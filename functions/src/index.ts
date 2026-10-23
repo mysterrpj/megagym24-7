@@ -6,6 +6,11 @@ import {
     getPublicClassReservationHandler,
     cancelPublicClassReservationHandler,
     adminClassReservationHandler,
+    getClassPaymentSettingsHandler,
+    updateClassPaymentSettingsHandler,
+    getClassPaymentVerificationHandler,
+    confirmClassPaymentByPinHandler,
+    createClassPaymentQuoteHandler,
 } from './classReservations';
 import {
     buildReminderDeliveryId,
@@ -26,6 +31,11 @@ export const createPublicClassReservation = functions.https.onCall((input: any, 
 export const getPublicClassReservation = functions.https.onCall((input: any, context: any) => getPublicClassReservationHandler(input, context));
 export const cancelPublicClassReservation = functions.https.onCall((input: any, context: any) => cancelPublicClassReservationHandler(input, context));
 export const adminClassReservation = functions.https.onCall((input: any, context: any) => adminClassReservationHandler(input, context));
+export const getClassPaymentSettings = functions.https.onCall((input: any, context: any) => getClassPaymentSettingsHandler(input, context));
+export const updateClassPaymentSettings = functions.https.onCall((input: any, context: any) => updateClassPaymentSettingsHandler(input, context));
+export const getClassPaymentVerification = functions.https.onCall((input: any, context: any) => getClassPaymentVerificationHandler(input, context));
+export const confirmClassPaymentByPin = functions.https.onCall((input: any, context: any) => confirmClassPaymentByPinHandler(input, context));
+export const createClassPaymentQuote = functions.https.onCall((input: any, context: any) => createClassPaymentQuoteHandler(input, context));
 
 const admin = require('firebase-admin');
 if (!admin.apps.length) {
