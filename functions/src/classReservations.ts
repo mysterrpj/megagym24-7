@@ -5,6 +5,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 type Data = Record<string, any>;
 type Context = functions.https.CallableContext;
 const DAY = 86400000;
+const MAX_CLASS_CAPACITY = 21;
 const ADMINS = ['admin@fitia.com', 'mysterrpj@gmail.com', 'prueba@test.com'];
 const messages: Record<string, string> = {
     'Use a valid Peruvian mobile phone.': 'Ingresa un celular peruano válido.',
@@ -75,7 +76,7 @@ export function reservationSession(classData: Data, date: string, publicOnly: bo
     const capacity = classData.capacity;
     const day = classData.dayIndex ?? classData.weekday ?? (Number(classData.day) - 1);
     const weekday = (new Date(`${date}T12:00:00-05:00`).getUTCDay() + 6) % 7;
-    if (classData.status !== 'active' || !Number.isInteger(capacity) || capacity < 1 || capacity > 20 ||
+    if (classData.status !== 'active' || !Number.isInteger(capacity) || capacity < 1 || capacity > MAX_CLASS_CAPACITY ||
         !Number.isInteger(day) || day !== weekday || !/^([01]\d|2[0-3]):[0-5]\d$/.test(classData.time || '')) {
         return fail('failed-precondition', 'This class session is unavailable.');
     }
@@ -90,7 +91,7 @@ export function reservationSession(classData: Data, date: string, publicOnly: bo
 export function reservationSeats(bookings: Data[], date: string, capacity: number) {
     const active = bookings.filter(b => !['cancelled', 'canceled'].includes(b.status) && (!b.date || b.date === date));
     const seats: Array<{spotNumber: number; status: 'available' | 'pending' | 'reserved' | 'blocked'}> =
-        Array.from({ length: 20 }, (_, i) => ({ spotNumber: i + 1, status: i < capacity ? 'available' : 'blocked' }));
+        Array.from({ length: MAX_CLASS_CAPACITY }, (_, i) => ({ spotNumber: i + 1, status: i < capacity ? 'available' : 'blocked' }));
     let ambiguous = false;
     for (const b of active) {
         // Legacy unassigned, invalid, or colliding seats cannot safely be guessed.
@@ -239,7 +240,7 @@ async function createReservation(input: Data, context: Context, isPublic: boolea
     const p: Data = isPublic ? publicPayload(input) : { classId: id(input?.classId, 'classId'), date: validateReservationDate(input?.date),
         spotNumber: input?.spotNumber, memberId: input?.memberId ? id(input.memberId, 'memberId') : '',
         name: input?.name, phone: input?.phone };
-    if (!Number.isInteger(p.spotNumber) || p.spotNumber < 1 || p.spotNumber > 20) fail('invalid-argument', 'Invalid spotNumber.');
+    if (!Number.isInteger(p.spotNumber) || p.spotNumber < 1 || p.spotNumber > MAX_CLASS_CAPACITY) fail('invalid-argument', 'Invalid spotNumber.');
     const requestId = isPublic ? text(input?.requestId, 'requestId', 16, 128) : '';
     if (isPublic && !/^[A-Za-z0-9_-]+$/.test(requestId)) fail('invalid-argument', 'Invalid requestId.');
     // Failed seat/code/duplicate attempts count too. This transaction commits independently of allocation.

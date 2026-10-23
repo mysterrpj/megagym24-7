@@ -18,7 +18,7 @@ function classRecord(id, name, instructor, dayIndex, time) {
             day: dayIndex + 1,
             time,
             duration: 60,
-            capacity: 20,
+            capacity: 21,
             price: 6,
             status: 'active',
             color: 'border-l-green-500',

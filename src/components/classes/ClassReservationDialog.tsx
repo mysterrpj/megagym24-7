@@ -62,8 +62,8 @@ interface ClassReservationDialogProps {
     onClose: () => void;
 }
 
-const ROOM_CAPACITY = 20;
-const ROOM_COLUMNS = 5;
+const ROOM_CAPACITY = 21;
+const FOUR_SEAT_ROWS = [[3, 4, 5, 6], [7, 8, 9, 10], [14, 15, 16, 17], [18, 19, 20, 21]];
 
 const paymentLabels: Record<string, string> = {
     paid: 'Pagado',
@@ -266,6 +266,43 @@ export function ClassReservationDialog({
         window.open(`https://wa.me/${phone}?text=${encodeURIComponent(message)}`, '_blank', 'noopener,noreferrer');
     };
 
+    function renderSeat(spot: number) {
+        const booking = seatAssignments.get(spot);
+        const bookingMember = booking ? members.find((member) => member.id === booking.memberId) : undefined;
+        const bookingName = booking?.memberName || bookingMember?.name || 'Reservado';
+        const isSelected = selectedSpot === spot;
+        const isPending = Boolean(booking && (!booking.paymentStatus || booking.paymentStatus === 'pending'));
+        const isCheckedIn = booking?.checkedIn;
+        const isBlocked = spot > effectiveCapacity && !booking;
+
+        return <button
+            type="button"
+            key={spot}
+            onClick={() => handleSpotSelection(spot)}
+            disabled={isBlocked}
+            className={`group relative aspect-square min-h-12 rounded-xl border text-center transition-all focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:ring-offset-2 focus:ring-offset-neutral-950 ${
+                isBlocked
+                    ? 'cursor-not-allowed border-white/5 bg-neutral-900/40 text-neutral-700'
+                    : isSelected
+                        ? 'border-emerald-400 bg-emerald-400 text-neutral-950 shadow-[0_0_0_3px_rgba(52,211,153,0.12)]'
+                        : isCheckedIn
+                        ? 'border-blue-400/40 bg-blue-400/15 text-blue-200 hover:bg-blue-400/20'
+                        : isPending
+                            ? 'border-amber-400/40 bg-amber-400/10 text-amber-200 hover:bg-amber-400/20'
+                            : booking
+                                ? 'border-rose-400/30 bg-rose-400/10 text-rose-200 hover:bg-rose-400/20'
+                                : 'border-white/10 bg-neutral-800/70 text-neutral-300 hover:border-emerald-400/50 hover:bg-emerald-400/10 hover:text-emerald-300'
+            }`}
+            title={isBlocked ? `Ubicación ${spot} fuera de la capacidad configurada` : booking ? `${bookingName} · ubicación ${spot}` : `Ubicación ${spot} disponible`}
+        >
+            <span className="block text-base font-black tabular-nums sm:text-lg">{String(spot).padStart(2, '0')}</span>
+            <span className={`mt-0.5 hidden truncate px-1 text-[9px] font-medium sm:block ${isSelected ? 'text-neutral-800' : 'text-current opacity-70'}`}>
+                {isBlocked ? 'Bloqueado' : booking ? bookingName.split(' ')[0] : 'Libre'}
+            </span>
+            {isCheckedIn && <Check className={`absolute right-1.5 top-1.5 h-3 w-3 ${isSelected ? 'text-neutral-950' : 'text-blue-300'}`} />}
+        </button>;
+    }
+
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-3 sm:p-6" onClick={() => { if (!saving) onClose(); }}>
             <div
@@ -315,52 +352,18 @@ export function ClassReservationDialog({
                         </div>
 
                         <div className="mx-auto max-w-2xl rounded-2xl border border-white/10 bg-neutral-950/50 p-4 sm:p-6">
-                            <div className="mb-7 rounded-lg border border-emerald-400/20 bg-emerald-400/10 px-4 py-2 text-center">
-                                <p className="text-[10px] font-bold uppercase tracking-[0.28em] text-emerald-400">Instructora · Espejo</p>
-                                <p className="mt-0.5 text-xs text-neutral-400">Frente del salón</p>
-                            </div>
-
-                            <div className="grid grid-cols-5 gap-2.5 sm:gap-4" style={{ gridTemplateColumns: `repeat(${ROOM_COLUMNS}, minmax(0, 1fr))` }}>
-                                {Array.from({ length: ROOM_CAPACITY }, (_, index) => index + 1).map((spot) => {
-                                    const booking = seatAssignments.get(spot);
-                                    const bookingMember = booking ? members.find((member) => member.id === booking.memberId) : undefined;
-                                    const bookingName = booking?.memberName || bookingMember?.name || 'Reservado';
-                                    const isSelected = selectedSpot === spot;
-                                    const isPending = Boolean(booking && (!booking.paymentStatus || booking.paymentStatus === 'pending'));
-                                    const isCheckedIn = booking?.checkedIn;
-                                    const isBlocked = spot > effectiveCapacity && !booking;
-
-                                    return (
-                                        <button
-                                            type="button"
-                                            key={spot}
-                                            onClick={() => handleSpotSelection(spot)}
-                                            disabled={isBlocked}
-                                            className={`group relative aspect-square min-h-12 rounded-xl border text-center transition-all focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:ring-offset-2 focus:ring-offset-neutral-950 ${
-                                                isBlocked
-                                                    ? 'cursor-not-allowed border-white/5 bg-neutral-900/40 text-neutral-700'
-                                                    : isSelected
-                                                        ? 'border-emerald-400 bg-emerald-400 text-neutral-950 shadow-[0_0_0_3px_rgba(52,211,153,0.12)]'
-                                                        : isCheckedIn
-                                                        ? 'border-blue-400/40 bg-blue-400/15 text-blue-200 hover:bg-blue-400/20'
-                                                        : isPending
-                                                            ? 'border-amber-400/40 bg-amber-400/10 text-amber-200 hover:bg-amber-400/20'
-                                                            : booking
-                                                                ? 'border-rose-400/30 bg-rose-400/10 text-rose-200 hover:bg-rose-400/20'
-                                                                : 'border-white/10 bg-neutral-800/70 text-neutral-300 hover:border-emerald-400/50 hover:bg-emerald-400/10 hover:text-emerald-300'
-                                            }`}
-                                            title={isBlocked ? `Ubicación ${spot} fuera de la capacidad configurada` : booking ? `${bookingName} · ubicación ${spot}` : `Ubicación ${spot} disponible`}
-                                        >
-                                            <span className="block text-base font-black tabular-nums sm:text-lg">{String(spot).padStart(2, '0')}</span>
-                                            <span className={`mt-0.5 hidden truncate px-1 text-[9px] font-medium sm:block ${isSelected ? 'text-neutral-800' : 'text-current opacity-70'}`}>
-                                                {isBlocked ? 'Bloqueado' : booking ? bookingName.split(' ')[0] : 'Libre'}
-                                            </span>
-                                            {isCheckedIn && (
-                                                <Check className={`absolute right-1.5 top-1.5 h-3 w-3 ${isSelected ? 'text-neutral-950' : 'text-blue-300'}`} />
-                                            )}
-                                        </button>
-                                    );
-                                })}
+                            <div className="space-y-3 sm:space-y-4" aria-label="Mapa físico de 21 ubicaciones">
+                                <div className="grid grid-cols-[minmax(0,1fr)_minmax(7rem,2fr)_minmax(0,1fr)] items-center gap-3 sm:gap-4">
+                                    {renderSeat(1)}
+                                    <div className="rounded-lg border border-emerald-400/20 bg-emerald-400/10 px-2 py-2 text-center">
+                                        <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-emerald-400">Tarima</p>
+                                        <p className="mt-0.5 text-[10px] text-neutral-400 sm:text-xs">Instructora · Espejo</p>
+                                    </div>
+                                    {renderSeat(2)}
+                                </div>
+                                {FOUR_SEAT_ROWS.slice(0, 2).map((row) => <div key={row[0]} className="grid grid-cols-4 gap-3 sm:gap-4">{row.map(renderSeat)}</div>)}
+                                <div className="mx-auto grid w-3/4 grid-cols-3 gap-3 sm:gap-4">{[11, 12, 13].map(renderSeat)}</div>
+                                {FOUR_SEAT_ROWS.slice(2).map((row) => <div key={row[0]} className="grid grid-cols-4 gap-3 sm:gap-4">{row.map(renderSeat)}</div>)}
                             </div>
 
                             <div className="mt-7 flex items-center justify-center gap-2 text-xs text-neutral-500">

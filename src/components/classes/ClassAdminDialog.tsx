@@ -40,7 +40,7 @@ export function ClassAdminDialog({ classItem: incomingClass, occurrenceDate, rea
     const [day, setDay] = useState(classItem?.day ?? 0);
     const [time, setTime] = useState(classItem?.time ?? '07:00');
     const [duration, setDuration] = useState(String(classItem?.duration ?? 60));
-    const [capacity, setCapacity] = useState(String(classItem?.capacity ?? 20));
+    const [capacity, setCapacity] = useState(String(classItem?.capacity ?? 21));
     const [price, setPrice] = useState(String(classItem?.price ?? 6));
     const [status, setStatus] = useState(classItem?.status ?? 'active');
     const [publicBookingEnabled, setPublicBookingEnabled] = useState(classItem?.publicBookingEnabled === true);
@@ -59,7 +59,7 @@ export function ClassAdminDialog({ classItem: incomingClass, occurrenceDate, rea
         setError('');
         if (!name.trim() || !instructor.trim()) return setError('Completa el nombre de la clase y el instructor.');
         if (!Number.isInteger(day) || day < 0 || day > 6 || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) return setError('Revisa el día y la hora.');
-        if (!Number.isInteger(Number(capacity)) || Number(capacity) < 1 || Number(capacity) > 20) return setError('La capacidad debe ser un entero de 1 a 20.');
+        if (!Number.isInteger(Number(capacity)) || Number(capacity) < 1 || Number(capacity) > 21) return setError('La capacidad debe ser un entero de 1 a 21.');
         if (!duration.trim() || !Number.isInteger(Number(duration)) || Number(duration) < 1 || Number(duration) > 1440) return setError('La duración debe ser de 1 a 1440 minutos.');
         if (!price.trim() || !Number.isFinite(Number(price)) || Number(price) < 0) return setError('El precio debe ser 0 o mayor.');
         if (paymentInstructions.trim().length > 2000 || (publicBookingEnabled && !paymentInstructions.trim())) return setError('Para reservas públicas, escribe instrucciones de pago manual (máximo 2000 caracteres). Para clases gratuitas, indica que no se requiere pago.');
@@ -92,7 +92,7 @@ export function ClassAdminDialog({ classItem: incomingClass, occurrenceDate, rea
                     const legacyDay = Number(current.day ?? 1);
                     const currentDay = Number(current.dayIndex ?? current.weekday ?? (legacyDay >= 1 && legacyDay <= 7 ? legacyDay - 1 : legacyDay));
                     const currentTime = current.time || (typeof current.hour === 'number' ? `${String(current.hour).padStart(2, '0')}:00` : '07:00');
-                    if (currentDay !== classItem.day || currentTime !== classItem.time || Number(current.capacity ?? 20) !== classItem.capacity || Number(current.duration ?? 60) !== classItem.duration || (current.name || 'Clase') !== classItem.name || (current.instructor || 'Por definir') !== classItem.instructor || Number(current.price ?? 6) !== (classItem.price ?? 6) || (current.status || 'active') !== classItem.status || (current.publicBookingEnabled === true) !== (classItem.publicBookingEnabled === true) || (current.paymentInstructions || '') !== (classItem.paymentInstructions || '')) {
+                    if (currentDay !== classItem.day || currentTime !== classItem.time || Number(current.capacity ?? 21) !== classItem.capacity || Number(current.duration ?? 60) !== classItem.duration || (current.name || 'Clase') !== classItem.name || (current.instructor || 'Por definir') !== classItem.instructor || Number(current.price ?? 6) !== (classItem.price ?? 6) || (current.status || 'active') !== classItem.status || (current.publicBookingEnabled === true) !== (classItem.publicBookingEnabled === true) || (current.paymentInstructions || '') !== (classItem.paymentInstructions || '')) {
                         throw new Error('La clase cambió mientras la editabas. Cierra y vuelve a abrir para revisar los cambios.');
                     }
                     transaction.update(reference, values);
@@ -127,7 +127,7 @@ export function ClassAdminDialog({ classItem: incomingClass, occurrenceDate, rea
                 <Button disabled={saving} variant="ghost" onClick={() => setTab('share')} aria-pressed={tab === 'share'} className={tab === 'share' ? 'bg-neutral-800' : ''}>Compartir</Button>
             </div>}
             {readOnly && <p className="text-sm text-amber-300">Vista de demostración: no se guardarán cambios ni se compartirán reservas.</p>}
-            {classItem && classItem.capacity > 20 && <p role="status" className="text-sm text-amber-300">Esta clase conserva una capacidad antigua de {classItem.capacity}. Para guardar, elige entre 1 y 20 lugares. Solo se permite ajustar la capacidad si no hay reservas futuras o sin fecha; no se cambia automáticamente.</p>}
+            {classItem && classItem.capacity > 21 && <p role="status" className="text-sm text-amber-300">Esta clase conserva una capacidad antigua de {classItem.capacity}. Para guardar, elige entre 1 y 21 lugares. Solo se permite ajustar la capacidad si no hay reservas futuras o sin fecha; no se cambia automáticamente.</p>}
             {tab === 'details' ? <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); void save(); }}>
                 <fieldset disabled={saving || readOnly} className="space-y-4 disabled:opacity-70">
                     <label className="block text-sm text-neutral-300">Nombre de la clase<input className={inputStyle} value={name} onChange={(e) => setName(e.target.value)} maxLength={120} required /></label>
@@ -136,7 +136,7 @@ export function ClassAdminDialog({ classItem: incomingClass, occurrenceDate, rea
                         <div className="text-sm text-neutral-300">Día<AdminSelect label="Día" disabled={saving || readOnly} value={String(day)} onChange={(value) => setDay(Number(value))} options={classDays.map((label, index) => ({ label, value: String(index) }))} /></div>
                         <label className="text-sm text-neutral-300">Hora<input type="time" className={inputStyle} value={time} onChange={(e) => setTime(e.target.value)} required /></label>
                         <label className="text-sm text-neutral-300">Duración (min)<input type="number" min="1" max="1440" className={inputStyle} value={duration} onChange={(e) => setDuration(e.target.value)} required /></label>
-                        <label className="text-sm text-neutral-300">Lugares (1–20)<input type="number" min="1" max="20" className={inputStyle} value={capacity} onChange={(e) => setCapacity(e.target.value)} required /></label>
+                        <label className="text-sm text-neutral-300">Lugares (1–21)<input type="number" min="1" max="21" className={inputStyle} value={capacity} onChange={(e) => setCapacity(e.target.value)} required /></label>
                         <label className="text-sm text-neutral-300">Precio (S/)<input type="number" min="0" step="0.01" className={inputStyle} value={price} onChange={(e) => setPrice(e.target.value)} required /></label>
                         <div className="text-sm text-neutral-300">Estado<AdminSelect label="Estado" disabled={saving || readOnly} value={status} onChange={setStatus} options={[{ value: 'active', label: 'Activa' }, { value: 'inactive', label: 'Inactiva' }]} /></div>
                     </div>
@@ -147,16 +147,16 @@ export function ClassAdminDialog({ classItem: incomingClass, occurrenceDate, rea
                 {error && <p role="alert" className="rounded-md border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-300">{error}</p>}
                 <div className="flex justify-end gap-2"><Button type="button" variant="ghost" disabled={saving} onClick={onClose}>Cerrar</Button><Button type="submit" disabled={saving || readOnly} className="bg-green-600 hover:bg-green-700">{saving ? 'Guardando…' : 'Guardar cambios'}</Button></div>
             </form> : <section className="space-y-4">
-                <p className="text-sm text-neutral-300">Comparte una sola vez la agenda permanente. Los próximos 7 días, horarios y cupos se actualizan automáticamente.</p>
-                {!shareEnabled && <p className="text-sm text-amber-300">Activa esta clase y habilita las reservas públicas en Detalles para que aparezca en la agenda.</p>}
+                <p className="text-sm text-neutral-300">Comparte una sola vez el enlace permanente. Abre directamente el plano de 21 lugares del próximo turno y permite cambiar día u horario sin salir.</p>
+                {!shareEnabled && <p className="text-sm text-amber-300">Activa esta clase y habilita las reservas públicas en Detalles para que aparezca en el selector del plano.</p>}
                 {local && <p className="rounded-md border border-amber-500/20 p-3 text-sm text-amber-300">Estos enlaces son locales: solo funcionan en esta máquina. Abre el sistema desde su dominio público para compartir con clientes.</p>}
                 <div className="rounded-lg border border-green-500/20 bg-green-500/5 p-4">
-                    <p className="text-sm font-semibold text-white">Agenda general · enlace permanente</p>
-                    <p className="mt-1 text-xs leading-5 text-neutral-400">Recomendado para WhatsApp, Instagram y código QR. El cliente elige día, horario y luego su ubicación.</p>
-                    <input ref={scheduleLinkRef} aria-label="Enlace permanente de horarios" readOnly value={scheduleLink} className={inputStyle} onFocus={(event) => event.target.select()} />
+                    <p className="text-sm font-semibold text-white">Plano de reservas · enlace permanente</p>
+                    <p className="mt-1 text-xs leading-5 text-neutral-400">Recomendado para WhatsApp, Instagram y código QR. El cliente entra al salón, cambia día u horario y elige su lugar.</p>
+                    <input ref={scheduleLinkRef} aria-label="Enlace permanente del plano de reservas" readOnly value={scheduleLink} className={inputStyle} onFocus={(event) => event.target.select()} />
                     <div className="mt-3 flex flex-wrap gap-2">
                         <Button disabled={!shareEnabled} onClick={() => void copyLink(scheduleLink, scheduleLinkRef, 'Enlace permanente')} className="bg-green-600 hover:bg-green-700">Copiar enlace permanente</Button>
-                        {shareEnabled && <a className="rounded-md border border-neutral-700 px-4 py-2 text-sm hover:bg-neutral-800 focus:ring-2 focus:ring-green-600" target="_blank" rel="noopener noreferrer" href={`https://wa.me/?text=${encodeURIComponent(`Horarios y reservas de clases grupales MegaGym: ${scheduleLink}`)}`}>Abrir WhatsApp</a>}
+                        {shareEnabled && <a className="rounded-md border border-neutral-700 px-4 py-2 text-sm hover:bg-neutral-800 focus:ring-2 focus:ring-green-600" target="_blank" rel="noopener noreferrer" href={`https://wa.me/?text=${encodeURIComponent(`Elige tu horario y lugar para las clases grupales MegaGym: ${scheduleLink}`)}`}>Abrir WhatsApp</a>}
                     </div>
                 </div>
                 <div className="rounded-lg border border-neutral-800 p-4">

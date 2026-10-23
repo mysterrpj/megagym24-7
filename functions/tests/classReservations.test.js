@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const { createHash, randomBytes } = require('node:crypto');
 const api = require('../lib/classReservations');
 const now = Date.parse('2026-06-01T10:00:00-05:00');
-const base = { status: 'active', capacity: 20, dayIndex: 0, time: '18:30', price: 6,
+const base = { status: 'active', capacity: 21, dayIndex: 0, time: '18:30', price: 6,
     publicBookingEnabled: true, paymentInstructions: 'Yape al número configurado' };
 const rejectsCode = (fn, code) => assert.throws(fn, e => e.code === code);
 
@@ -26,8 +26,9 @@ test('session validates local start, weekday representations and strict capacity
     assert.equal(session.startsAt, Date.parse('2026-06-01T23:30:00Z'));
     assert.equal(session.bookingOpen, true);
     assert.equal(api.reservationSession(base, '2026-06-01', true, session.startsAt).bookingOpen, false);
-    assert.equal(api.reservationSession({ ...base, dayIndex: undefined, day: 1 }, '2026-06-01', true, now).capacity, 20);
-    for (const change of [{ dayIndex: 1 }, { capacity: 21 }, { capacity: 0 }, { capacity: '20' }, { time: '24:00' }, { status: 'inactive' }]) {
+    assert.equal(api.reservationSession({ ...base, dayIndex: undefined, day: 1 }, '2026-06-01', true, now).capacity, 21);
+    assert.equal(api.reservationSession({ ...base, capacity: 21 }, '2026-06-01', true, now).capacity, 21);
+    for (const change of [{ dayIndex: 1 }, { capacity: 22 }, { capacity: 0 }, { capacity: '21' }, { time: '24:00' }, { status: 'inactive' }]) {
         rejectsCode(() => api.reservationSession({ ...base, ...change }, '2026-06-01', true, now), 'failed-precondition');
     }
 });
@@ -37,7 +38,11 @@ test('public enabling and explicit payment instructions are mandatory', () => {
     }
     assert.ok(api.reservationSession({ ...base, publicBookingEnabled: false }, '2026-06-01', false, now));
 });
-test('public seats omit identities and never expire a pending review', () => {
+test('public seats expose all 21 positions while omitting identities and never expiring a pending review', () => {
+    const fullRoom = api.reservationSeats([], '2026-06-01', 21);
+    assert.equal(fullRoom.length, 21);
+    assert.equal(fullRoom.filter(seat => seat.status === 'available').length, 21);
+    assert.deepEqual(fullRoom[20], { spotNumber: 21, status: 'available' });
     const seats = api.reservationSeats([{ date: '2026-06-01', spotNumber: 1, status: 'pending', memberName: 'secret', expiresAt: 0 },
         { spotNumber: 2, status: 'confirmed' }, { spotNumber: 3, status: 'cancelled' },
         { spotNumber: 4, status: 'canceled' }, { date: '2026-06-08', spotNumber: 5 }], '2026-06-01', 5);
@@ -47,11 +52,11 @@ test('public seats omit identities and never expire a pending review', () => {
     assert.equal(seats[3].status, 'available');
     assert.equal(seats[4].status, 'available');
     assert.equal(seats[5].status, 'blocked');
-    assert.equal(seats.length, 20);
+    assert.equal(seats.length, 21);
 });
 test('legacy ambiguity cannot bypass occupied capacity', () => {
-    for (const bookings of [[{ status: 'confirmed' }], [{ spotNumber: 1 }, { spotNumber: 1 }], [{ spotNumber: 21 }], [{ spotNumber: '1' }]]) {
-        assert.equal(api.reservationSeats(bookings, '2026-06-01', 20).some(s => s.status === 'available'), false);
+    for (const bookings of [[{ status: 'confirmed' }], [{ spotNumber: 1 }, { spotNumber: 1 }], [{ spotNumber: 22 }], [{ spotNumber: '1' }]]) {
+        assert.equal(api.reservationSeats(bookings, '2026-06-01', 21).some(s => s.status === 'available'), false);
     }
 });
 test('public schedule uses Lima calendar days and exposes only safe availability totals', () => {
@@ -72,7 +77,7 @@ test('public schedule uses Lima calendar days and exposes only safe availability
     assert.equal(schedule.days[0].classes.length, 1);
     assert.deepEqual(schedule.days[0].classes[0], {
         id: 'fullbody', name: 'FULLBODY', instructor: 'LIZ PIA', time: '18:30', duration: 60,
-        capacity: 20, price: 6, availableSpots: 18, bookingOpen: true
+        capacity: 21, price: 6, availableSpots: 19, bookingOpen: true
     });
     assert.equal(JSON.stringify(schedule).includes('999999999'), false);
     assert.equal(JSON.stringify(schedule).includes('SECRET'), false);

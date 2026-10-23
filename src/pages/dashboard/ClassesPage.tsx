@@ -22,7 +22,7 @@ function normalizeClass(raw: Record<string, any>, id: string): ClassDoc {
         time: raw.time || (typeof raw.hour === 'number' ? `${String(raw.hour).padStart(2, '0')}:00` : '07:00'),
         duration: Number(raw.duration) || 60,
         // Keep the stored capacity as the edit baseline; never silently migrate legacy rooms.
-        capacity: raw.capacity != null && Number.isFinite(Number(raw.capacity)) ? Number(raw.capacity) : 20,
+        capacity: raw.capacity != null && Number.isFinite(Number(raw.capacity)) ? Number(raw.capacity) : 21,
         price: raw.price != null && Number.isFinite(Number(raw.price)) ? Number(raw.price) : 6,
         color: 'border-l-green-600', status: raw.status || 'active',
         publicBookingEnabled: raw.publicBookingEnabled === true,
@@ -31,7 +31,7 @@ function normalizeClass(raw: Record<string, any>, id: string): ClassDoc {
 }
 
 const demoClasses: ClassDoc[] = [
-    { id: 'demo-fullbody', name: 'FULLBODY · ejemplo', instructor: 'Coach demo', day: 0, time: '08:30', duration: 60, capacity: 20, price: 6, status: 'active', color: 'border-l-green-600', publicBookingEnabled: false },
+    { id: 'demo-fullbody', name: 'FULLBODY · ejemplo', instructor: 'Coach demo', day: 0, time: '08:30', duration: 60, capacity: 21, price: 6, status: 'active', color: 'border-l-green-600', publicBookingEnabled: false },
     { id: 'demo-movilidad', name: 'Movilidad · ejemplo', instructor: 'Coach demo', day: 2, time: '18:00', duration: 45, capacity: 16, price: 0, status: 'active', color: 'border-l-green-600', publicBookingEnabled: false },
 ];
 
@@ -118,7 +118,7 @@ export function ClassesPage() {
             .filter((item) => item.day === weekdayIndex(day))
             .map((item) => ({ item, dateKey, bookings: getOccurrenceBookings(item, dateKey) }));
     });
-    const totalCapacity = visibleOccurrences.reduce((sum, occurrence) => sum + Math.min(20, occurrence.item.capacity), 0);
+    const totalCapacity = visibleOccurrences.reduce((sum, occurrence) => sum + Math.min(21, occurrence.item.capacity), 0);
     const totalBookings = visibleOccurrences.reduce((sum, occurrence) => sum + occurrence.bookings.length, 0);
     const pendingInRange = visibleOccurrences.reduce((sum, occurrence) => sum + occurrence.bookings.filter(isPendingPayment).length, 0);
     const nextActiveDate = visibleDays.find((day) =>
@@ -279,7 +279,7 @@ export function ClassesPage() {
                                 const occurrence = getOccurrenceBookings(item, dateKey);
                                 const pending = occurrence.filter(isPendingPayment).length;
                                 const confirmed = occurrence.length - pending;
-                                const capacity = Math.min(20, item.capacity);
+                                const capacity = Math.min(21, item.capacity);
                                 const free = Math.max(0, capacity - occurrence.length);
                                 return <button key={item.id} type="button" onClick={() => openClass(item, day)} className={`w-full rounded-md border border-neutral-700/50 border-l-2 ${pending > 0 ? 'border-l-amber-400 bg-amber-400/[0.06]' : 'border-l-green-600 bg-neutral-800/50'} p-3 text-left transition-colors hover:bg-neutral-800 focus:outline-none focus:ring-2 focus:ring-green-600`}>
                                     <div className="flex items-start justify-between gap-2"><p className="font-medium text-white">{item.name}</p>{pending > 0 && <span className="rounded-full bg-amber-400/10 px-2 py-0.5 text-[9px] font-bold text-amber-200">{pending} pendiente{pending !== 1 ? 's' : ''}</span>}</div>
