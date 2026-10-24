@@ -1,5 +1,6 @@
+import { useEffect, useRef } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { MessageSquare, Users, CreditCard, Calendar, Settings, LayoutDashboard, LogOut, DoorOpen } from 'lucide-react';
+import { MessageSquare, Users, CreditCard, Calendar, Settings, LayoutDashboard, LogOut, DoorOpen, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { signOut } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
@@ -15,8 +16,18 @@ const sidebarItems = [
     { icon: Settings, label: 'Configuración', href: '/dashboard/settings' },
 ];
 
-export function Sidebar() {
+interface SidebarProps {
+    open: boolean;
+    onClose: () => void;
+}
+
+export function Sidebar({ open, onClose }: SidebarProps) {
     const navigate = useNavigate();
+    const closeButtonRef = useRef<HTMLButtonElement>(null);
+
+    useEffect(() => {
+        if (open) window.setTimeout(() => closeButtonRef.current?.focus(), 0);
+    }, [open]);
 
     const handleLogout = async () => {
         try {
@@ -28,53 +39,85 @@ export function Sidebar() {
     };
 
     return (
-        <aside className="w-64 bg-card border-r border-border flex flex-col h-screen sticky top-0">
-            <div className="p-6">
-                <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 bg-green-500 rounded-lg flex items-center justify-center">
-                        <span className="font-bold text-white">IA</span>
-                    </div>
-                    <span className="text-xl font-bold text-white">Fit IA</span>
-                </div>
-            </div>
+        <>
+            <button
+                type="button"
+                aria-label="Cerrar menú"
+                tabIndex={open ? 0 : -1}
+                onClick={onClose}
+                className={cn(
+                    'fixed inset-0 z-40 bg-black/70 transition-opacity duration-200 lg:hidden',
+                    open ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'
+                )}
+            />
 
-            <nav className="flex-1 px-4 py-4 space-y-1">
-                {sidebarItems.map((item) => (
-                    <NavLink
-                        key={item.href}
-                        to={item.href}
-                        className={({ isActive }) =>
-                            cn(
-                                "flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors",
-                                isActive
-                                    ? "bg-green-500/10 text-green-500"
-                                    : "text-muted-foreground hover:bg-accent hover:text-white"
-                            )
-                        }
+            <aside
+                id="admin-sidebar"
+                aria-label="Navegación administrativa"
+                className={cn(
+                    'fixed inset-y-0 left-0 z-50 flex h-dvh w-[min(18rem,88vw)] flex-col border-r border-border bg-card shadow-2xl transition-transform duration-200 ease-out',
+                    open ? 'visible translate-x-0' : 'invisible -translate-x-full',
+                    'lg:visible lg:sticky lg:top-0 lg:z-20 lg:h-screen lg:w-64 lg:shrink-0 lg:translate-x-0 lg:shadow-none'
+                )}
+            >
+                <div className="flex min-h-20 items-center justify-between gap-3 px-5 py-4 lg:px-6">
+                    <div className="flex min-w-0 items-center gap-2.5">
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-green-500">
+                            <span className="font-bold text-white">IA</span>
+                        </div>
+                        <div className="min-w-0">
+                            <p className="truncate text-lg font-bold text-card-foreground">Fit IA</p>
+                            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-green-500">MegaGym</p>
+                        </div>
+                    </div>
+                    <button
+                        ref={closeButtonRef}
+                        type="button"
+                        aria-label="Cerrar menú de administración"
+                        onClick={onClose}
+                        className="grid h-10 w-10 shrink-0 place-items-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground focus:outline-none focus:ring-2 focus:ring-green-500 lg:hidden"
                     >
-                        <item.icon className="w-5 h-5" />
-                        {item.label}
-                    </NavLink>
-                ))}
-            </nav>
-
-            <div className="p-4 border-t border-border">
-                <div className="flex items-center gap-3 mb-4">
-                    <div className="w-10 h-10 rounded-full bg-slate-700"></div>
-                    <div>
-                        <p className="text-sm font-medium text-white">Admin</p>
-                        <p className="text-xs text-muted-foreground">admin@fitia.com</p>
-                    </div>
+                        <X className="h-5 w-5" />
+                    </button>
                 </div>
-                <Button
-                    variant="ghost"
-                    className="w-full justify-start text-red-500 hover:text-red-400 hover:bg-red-500/10"
-                    onClick={handleLogout}
-                >
-                    <LogOut className="w-5 h-5 mr-2" />
-                    Cerrar Sesión
-                </Button>
-            </div>
-        </aside>
+
+                <nav className="flex-1 space-y-1 overflow-y-auto px-4 py-3">
+                    {sidebarItems.map((item) => (
+                        <NavLink
+                            key={item.href}
+                            to={item.href}
+                            onClick={onClose}
+                            className={({ isActive }) => cn(
+                                'flex min-h-12 items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-green-500',
+                                isActive
+                                    ? 'bg-green-500/10 text-green-600 dark:text-green-500'
+                                    : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+                            )}
+                        >
+                            <item.icon className="h-5 w-5 shrink-0" />
+                            {item.label}
+                        </NavLink>
+                    ))}
+                </nav>
+
+                <div className="border-t border-border p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+                    <div className="mb-3 flex items-center gap-3 px-2">
+                        <div className="h-10 w-10 shrink-0 rounded-full bg-slate-700" />
+                        <div className="min-w-0">
+                            <p className="truncate text-sm font-medium text-card-foreground">Admin</p>
+                            <p className="truncate text-xs text-muted-foreground">admin@fitia.com</p>
+                        </div>
+                    </div>
+                    <Button
+                        variant="ghost"
+                        className="min-h-11 w-full justify-start text-red-500 hover:bg-red-500/10 hover:text-red-400"
+                        onClick={handleLogout}
+                    >
+                        <LogOut className="mr-2 h-5 w-5" />
+                        Cerrar sesión
+                    </Button>
+                </div>
+            </aside>
+        </>
     );
 }

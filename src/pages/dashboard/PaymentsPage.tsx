@@ -341,17 +341,17 @@ export function PaymentsPage() {
 
     return (
         <div className="space-y-6">
-            <div className="flex justify-between items-center">
+            <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                    <h1 className="text-3xl font-bold text-white">Pagos y Facturación</h1>
+                    <h1 className="text-2xl font-bold text-white sm:text-3xl">Pagos y Facturación</h1>
                     <p className="text-gray-400">Gestiona transacciones e historial financiero</p>
                 </div>
-                <div className="flex gap-2">
-                    <Button variant="outline" className="border-neutral-700 text-gray-300">
+                <div className="flex w-full flex-wrap gap-2 sm:w-auto">
+                    <Button variant="outline" className="flex-1 border-neutral-700 text-gray-300 sm:flex-none">
                         <Download className="mr-2 h-4 w-4" /> Exportar
                     </Button>
                     <Button
-                        className="bg-green-600 hover:bg-green-700"
+                        className="flex-1 bg-green-600 hover:bg-green-700 sm:flex-none"
                         onClick={() => setIsNewInvoiceOpen(true)}
                     >
                         <Plus className="mr-2 h-4 w-4" /> Nueva Factura
@@ -507,7 +507,8 @@ export function PaymentsPage() {
                     {loading ? (
                         <div className="text-center py-12 text-gray-400">Cargando transacciones...</div>
                     ) : (
-                        <table className="w-full text-left text-sm text-gray-400">
+                        <div className="overflow-x-auto">
+                        <table className="min-w-[56rem] w-full text-left text-sm text-gray-400">
                             <thead className="bg-neutral-800/50 text-gray-300">
                                 <tr>
                                     <th className="px-6 py-4">Miembro</th>
@@ -585,6 +586,7 @@ export function PaymentsPage() {
                                 ))}
                             </tbody>
                         </table>
+                        </div>
                     )}
                 </CardContent>
             </Card>

@@ -2,7 +2,7 @@ import { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Search, MoreVertical, Phone, Video, MessageSquare } from 'lucide-react';
+import { ArrowLeft, Search, MoreVertical, Phone, Video, MessageSquare } from 'lucide-react';
 
 import { db } from '@/lib/firebase';
 import { collection, query, orderBy, onSnapshot } from 'firebase/firestore';
@@ -168,8 +168,8 @@ export function MessagesPage() {
     const selectedConversation = conversations.find((conv) => conv.phone === selectedPhone);
 
     return (
-        <div className="flex h-[calc(100vh-8rem)] gap-6">
-            <Card className="w-1/3 flex flex-col bg-neutral-900 border-neutral-800 overflow-hidden">
+        <div className="flex h-[calc(100dvh-6.5rem)] min-h-[32rem] gap-4 lg:h-[calc(100vh-4rem)] lg:gap-6">
+            <Card className={cn('w-full flex-col overflow-hidden border-neutral-800 bg-neutral-900 lg:flex lg:w-1/3', selectedPhone ? 'hidden' : 'flex')}>
                 <div className="p-4 border-b border-neutral-800">
                     <h2 className="text-xl font-bold text-white mb-4">Mensajes</h2>
                     <div className="relative">
@@ -212,26 +212,27 @@ export function MessagesPage() {
                 </div>
             </Card>
 
-            <Card className="flex-1 flex flex-col bg-neutral-900 border-neutral-800 overflow-hidden text-white relative">
+            <Card className={cn('relative min-w-0 flex-1 flex-col overflow-hidden border-neutral-800 bg-neutral-900 text-white lg:flex', selectedPhone ? 'flex' : 'hidden')}>
                 {selectedPhone ? (
                     <>
-                        <div className="p-4 border-b border-neutral-800 flex justify-between items-center bg-neutral-900">
-                            <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-green-500 to-emerald-700 flex items-center justify-center text-white font-bold">
+                        <div className="flex items-center justify-between gap-2 border-b border-neutral-800 bg-neutral-900 p-3 sm:p-4">
+                            <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+                                <button type="button" onClick={() => setSelectedPhone(null)} aria-label="Volver a conversaciones" className="grid h-10 w-10 shrink-0 place-items-center rounded-lg text-gray-400 hover:bg-neutral-800 hover:text-white lg:hidden"><ArrowLeft className="h-5 w-5" /></button>
+                                <div className="w-10 h-10 shrink-0 rounded-full bg-gradient-to-tr from-green-500 to-emerald-700 flex items-center justify-center text-white font-bold">
                                     {selectedPhone.slice(-2)}
                                 </div>
-                                <div>
-                                    <h3 className="font-bold">{selectedConversation?.name || selectedPhone}</h3>
-                                    <p className="text-xs text-gray-500">{selectedPhone}</p>
+                                <div className="min-w-0">
+                                    <h3 className="truncate font-bold">{selectedConversation?.name || selectedPhone}</h3>
+                                    <p className="truncate text-xs text-gray-500">{selectedPhone}</p>
                                     <span className="text-xs text-green-500 flex items-center gap-1">
                                         <span className="w-2 h-2 rounded-full bg-green-500 inline-block animate-pulse"></span>
                                         En línea
                                     </span>
                                 </div>
                             </div>
-                            <div className="flex gap-2 text-gray-400">
+                            <div className="flex shrink-0 gap-0.5 text-gray-400 sm:gap-2">
                                 <Button variant="ghost" size="icon" className="hover:text-white"><Phone className="w-5 h-5" /></Button>
-                                <Button variant="ghost" size="icon" className="hover:text-white"><Video className="w-5 h-5" /></Button>
+                                <Button variant="ghost" size="icon" className="hidden hover:text-white sm:inline-flex"><Video className="w-5 h-5" /></Button>
                                 <Button variant="ghost" size="icon" className="hover:text-white"><MoreVertical className="w-5 h-5" /></Button>
                             </div>
                         </div>

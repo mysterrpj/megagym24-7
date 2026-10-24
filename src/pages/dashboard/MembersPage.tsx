@@ -361,9 +361,9 @@ function MemberModal({
     };
 
     return (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={onClose}>
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/70 p-3 sm:items-center sm:p-4" onClick={onClose}>
             <div
-                className="bg-neutral-900 rounded-xl w-full max-w-md border border-neutral-800 shadow-2xl"
+                className="my-auto max-h-[calc(100dvh-1.5rem)] w-full max-w-md overflow-y-auto rounded-xl border border-neutral-800 bg-neutral-900 shadow-2xl sm:max-h-[calc(100dvh-2rem)]"
                 onClick={(e) => e.stopPropagation()}
             >
                 {/* Header */}
@@ -380,7 +380,7 @@ function MemberModal({
                 {/* Form */}
                 <div className="p-4 space-y-4">
                     {/* Name & DNI */}
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                         <div>
                             <label className="block text-sm text-gray-400 mb-2">Nombre Completo</label>
                             <input
@@ -406,7 +406,7 @@ function MemberModal({
                     </div>
 
                     {/* Email & Phone */}
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                         <div>
                             <label className="block text-sm text-gray-400 mb-2">Email</label>
                             <div className="relative">
@@ -486,7 +486,7 @@ function MemberModal({
                     )}
 
                     {/* Plan & Status */}
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                         <div>
                             <label className="block text-sm text-gray-400 mb-2">Plan</label>
                             <select
@@ -687,7 +687,7 @@ function MemberModal({
                                     ))}
                                 </select>
                             </div>
-                            <div className="grid grid-cols-2 gap-3">
+                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                                 <div>
                                     <label className="block text-xs text-gray-400 mb-1">Objetivo</label>
                                     <input
@@ -712,7 +712,7 @@ function MemberModal({
                                     </select>
                                 </div>
                             </div>
-                            <div className="grid grid-cols-2 gap-3">
+                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                                 <div>
                                     <label className="block text-xs text-gray-400 mb-1">Días/semana</label>
                                     <input
@@ -809,9 +809,9 @@ function PaymentModal({
     };
 
     return (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={onClose}>
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/70 p-3 sm:items-center sm:p-4" onClick={onClose}>
             <div
-                className="bg-neutral-900 rounded-xl w-full max-w-md border border-neutral-800 shadow-2xl"
+                className="my-auto max-h-[calc(100dvh-1.5rem)] w-full max-w-md overflow-y-auto rounded-xl border border-neutral-800 bg-neutral-900 shadow-2xl sm:max-h-[calc(100dvh-2rem)]"
                 onClick={(e) => e.stopPropagation()}
             >
                 {/* Header */}
@@ -988,8 +988,8 @@ function CashPaymentModal({
     };
 
     return (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-            <div className="bg-neutral-900 border border-neutral-800 rounded-xl w-full max-w-sm p-6 space-y-5">
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/70 p-3 sm:items-center sm:p-4">
+            <div className="my-auto max-h-[calc(100dvh-1.5rem)] w-full max-w-sm space-y-5 overflow-y-auto rounded-xl border border-neutral-800 bg-neutral-900 p-4 sm:max-h-[calc(100dvh-2rem)] sm:p-6">
                 <div className="flex justify-between items-center">
                     <h2 className="text-white font-semibold text-lg">Registrar Pago en Efectivo</h2>
                     <button onClick={onClose} className="text-gray-500 hover:text-white"><X className="w-5 h-5" /></button>
@@ -1244,8 +1244,8 @@ function RoutinesModal({ member, onClose }: { member: Member; onClose: () => voi
     };
 
     return (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-            <div className="bg-neutral-900 border border-neutral-800 rounded-xl w-full max-w-lg shadow-2xl">
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/70 p-3 sm:items-center sm:p-4">
+            <div className="my-auto max-h-[calc(100dvh-1.5rem)] w-full max-w-lg overflow-y-auto rounded-xl border border-neutral-800 bg-neutral-900 shadow-2xl sm:max-h-[calc(100dvh-2rem)]">
                 {/* Header */}
                 <div className="flex items-center justify-between p-5 border-b border-neutral-800">
                     <div>
@@ -1963,9 +1963,9 @@ export function MembersPage() {
     return (
         <div className="space-y-6">
             {/* Header */}
-            <div className="flex justify-between items-center">
+            <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                    <h1 className="text-3xl font-bold text-white">Miembros</h1>
+                    <h1 className="text-2xl font-bold text-white sm:text-3xl">Miembros</h1>
                     <p className="text-gray-400">Gestiona los miembros de tu gimnasio</p>
                 </div>
                 <Button
@@ -1973,9 +1973,9 @@ export function MembersPage() {
                         setSelectedMember(undefined);
                         setModalMode('create');
                     }}
-                    className="bg-green-600 hover:bg-green-700"
+                    className="w-full bg-green-600 hover:bg-green-700 sm:w-auto"
                 >
-                    <UserPlus className="mr-2 h-4 w-4" /> Nuevo Miembro
+                    <UserPlus className="mr-2 h-4 w-4" /> Nuevo miembro
                 </Button>
             </div>
 

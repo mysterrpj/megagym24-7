@@ -57,9 +57,9 @@ function CreateMembershipModal({ onClose, onSubmit }: { onClose: () => void; onS
     };
 
     return (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={onClose}>
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/70 p-3 sm:items-center sm:p-4" onClick={onClose}>
             <div
-                className="bg-neutral-900 rounded-xl w-full max-w-md border border-neutral-800 shadow-2xl"
+                className="my-auto max-h-[calc(100dvh-1.5rem)] w-full max-w-md overflow-y-auto rounded-xl border border-neutral-800 bg-neutral-900 shadow-2xl sm:max-h-[calc(100dvh-2rem)]"
                 onClick={(e) => e.stopPropagation()}
             >
                 {/* Header */}
@@ -331,13 +331,13 @@ export function MembershipsPage() {
 
     return (
         <div className="space-y-8">
-            <div className="flex justify-between items-center">
+            <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                    <h1 className="text-3xl font-bold text-white">Membresías</h1>
+                    <h1 className="text-2xl font-bold text-white sm:text-3xl">Membresías</h1>
                     <p className="text-gray-400">Gestiona los planes de tu gimnasio</p>
                 </div>
-                <Button onClick={() => setShowCreateModal(true)} className="bg-green-600 hover:bg-green-700">
-                    <Plus className="mr-2 h-4 w-4" /> Nueva Membresía
+                <Button onClick={() => setShowCreateModal(true)} className="w-full bg-green-600 hover:bg-green-700 sm:w-auto">
+                    <Plus className="mr-2 h-4 w-4" /> Nueva membresía
                 </Button>
             </div>
 
