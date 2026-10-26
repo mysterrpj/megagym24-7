@@ -1,6 +1,6 @@
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Check, Plus, X, MoreHorizontal, Edit2, Trash2, Users, Loader2 } from 'lucide-react';
+import { Plus, X, MoreHorizontal, Edit2, Trash2, Users, Loader2 } from 'lucide-react';
 import { useState, KeyboardEvent, useEffect } from 'react';
 import { collection, onSnapshot, addDoc, deleteDoc, doc, serverTimestamp, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
@@ -19,7 +19,7 @@ interface Membership {
 // Create Membership Modal Component
 function CreateMembershipModal({ onClose, onSubmit }: { onClose: () => void; onSubmit: (membership: Omit<Membership, 'id' | 'activeMembers' | 'status'>) => Promise<void> }) {
     const [name, setName] = useState('');
-    const [price, setPrice] = useState(500);
+    const [price, setPrice] = useState(70);
     const [duration, setDuration] = useState(30);
     const [benefits, setBenefits] = useState<string[]>([]);
     const [benefitInput, setBenefitInput] = useState('');
@@ -90,7 +90,7 @@ function CreateMembershipModal({ onClose, onSubmit }: { onClose: () => void; onS
                     {/* Price & Duration Row */}
                     <div className="grid grid-cols-2 gap-3">
                         <div>
-                            <label className="block text-sm text-gray-400 mb-2">Precio (MXN)</label>
+                            <label className="block text-sm text-gray-400 mb-2">Precio (S/)</label>
                             <input
                                 type="number"
                                 value={price}
@@ -159,80 +159,82 @@ function CreateMembershipModal({ onClose, onSubmit }: { onClose: () => void; onS
     );
 }
 
-// Membership Card Component
-function MembershipCard({ membership, onEdit, onDelete }: { membership: Membership; onEdit: () => void; onDelete: () => void }) {
+// Compact membership row
+function MembershipRow({ membership, onEdit, onDelete }: { membership: Membership; onEdit: () => void; onDelete: () => void }) {
     const [showMenu, setShowMenu] = useState(false);
+    const isActive = membership.status !== 'inactive';
 
     return (
-        <Card className="bg-neutral-900 border-neutral-800 overflow-hidden">
-            {/* Green Gradient Header */}
-            <div className="h-20 bg-gradient-to-br from-green-600 to-green-800 relative">
-                <div className="absolute inset-0 bg-black/20" />
+        <article className="relative grid min-h-[5.5rem] grid-cols-[4.5rem_minmax(0,1fr)_auto] items-center gap-3 px-3 py-3 transition-colors hover:bg-white/[0.025] sm:grid-cols-[5.5rem_minmax(12rem,1fr)_minmax(9rem,0.7fr)_auto] sm:px-4">
+            <div className="min-w-0 border-r border-white/[0.07] pr-3">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-600">Precio</p>
+                <p className="mt-1 whitespace-nowrap text-lg font-bold tabular-nums text-green-400">S/ {membership.price}</p>
             </div>
 
-            <CardContent className="p-4 -mt-4 relative">
-                {/* Badge */}
-                <div className="flex items-center justify-between mb-2">
-                    <h3 className="text-lg font-bold text-white">{membership.name}</h3>
-                    <span className="text-xs bg-green-500/20 text-green-400 px-2 py-0.5 rounded-full font-medium">
-                        Activo
+            <div className="min-w-0">
+                <div className="flex min-w-0 items-center gap-2">
+                    <h3 className="truncate text-sm font-bold uppercase tracking-wide text-white">{membership.name}</h3>
+                    <span className={isActive
+                        ? "shrink-0 rounded-full bg-green-500/10 px-1.5 py-0.5 text-[9px] font-bold text-green-400"
+                        : "shrink-0 rounded-full bg-white/5 px-1.5 py-0.5 text-[9px] font-bold text-gray-400"
+                    }>
+                        {isActive ? 'Activo' : 'Inactivo'}
                     </span>
                 </div>
+                <p className="mt-1 text-xs text-gray-500">{membership.duration} días</p>
+                {membership.benefits.length > 0 && (
+                    <p className="mt-1 truncate text-[10px] text-gray-600">{membership.benefits.slice(0, 2).join(' · ')}</p>
+                )}
+            </div>
 
-                {/* Price */}
-                <div className="mb-4">
-                    <span className="text-2xl font-bold text-green-400">S/ {membership.price}</span>
-                    <span className="text-gray-400 text-sm"> / {membership.duration} días</span>
-                </div>
+            <div className="hidden min-w-0 items-center gap-2 text-sm text-gray-400 sm:flex">
+                <Users className="h-4 w-4 shrink-0 text-gray-600" />
+                <span>{membership.activeMembers || 0} miembro{membership.activeMembers === 1 ? '' : 's'} activo{membership.activeMembers === 1 ? '' : 's'}</span>
+            </div>
 
-                {/* Benefits */}
-                <div className="space-y-2 mb-4">
-                    {membership.benefits.map((benefit, idx) => (
-                        <div key={idx} className="flex items-center gap-2 text-sm text-gray-300">
-                            <Check className="w-4 h-4 text-green-500 shrink-0" />
-                            {benefit}
-                        </div>
-                    ))}
+            <div className="flex items-center gap-1">
+                <div className="flex items-center gap-1 text-[10px] text-gray-500 sm:hidden">
+                    <Users className="h-3.5 w-3.5" />
+                    <span className="tabular-nums">{membership.activeMembers || 0}</span>
                 </div>
+                <div className="relative">
+                    <button
+                        type="button"
+                        aria-label={`Acciones de ${membership.name}`}
+                        aria-expanded={showMenu}
+                        onClick={() => setShowMenu(!showMenu)}
+                        className="grid h-9 w-9 place-items-center rounded-lg text-gray-500 transition-colors hover:bg-neutral-800 hover:text-white focus:outline-none focus:ring-2 focus:ring-green-500"
+                    >
+                        <MoreHorizontal className="h-5 w-5" />
+                    </button>
+                    {showMenu && (
+                        <>
+                            <button type="button" aria-label="Cerrar menú" className="fixed inset-0 z-40 bg-black/40 sm:bg-transparent" onClick={() => setShowMenu(false)} />
+                            <div className="fixed inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-50 rounded-xl border border-white/10 bg-neutral-900 p-1.5 shadow-2xl sm:absolute sm:inset-x-auto sm:bottom-auto sm:right-0 sm:top-10 sm:w-40 sm:rounded-lg">
+                                <button
+                                    type="button"
+                                    onClick={() => { onEdit(); setShowMenu(false); }}
+                                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-sm text-gray-300 transition-colors hover:bg-neutral-800"
+                                >
+                                    <Edit2 className="h-4 w-4" />
+                                    Editar plan
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => { onDelete(); setShowMenu(false); }}
+                                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-sm text-red-400 transition-colors hover:bg-neutral-800"
+                                >
+                                    <Trash2 className="h-4 w-4" />
+                                    Eliminar
+                                </button>
+                            </div>
+                        </>
+                    )}
+                </div>
+            </div>
 
-                {/* Footer */}
-                <div className="flex items-center justify-between pt-4 border-t border-neutral-800">
-                    <div className="flex items-center gap-2 text-sm text-gray-400">
-                        <Users className="w-4 h-4" />
-                        {membership.activeMembers || 0} miembros activos
-                    </div>
-                    <div className="relative">
-                        <button
-                            onClick={() => setShowMenu(!showMenu)}
-                            className="p-1 hover:bg-neutral-800 rounded transition-colors"
-                        >
-                            <MoreHorizontal className="w-5 h-5 text-gray-400" />
-                        </button>
-                        {showMenu && (
-                            <>
-                                <div className="fixed inset-0" onClick={() => setShowMenu(false)} />
-                                <div className="absolute right-0 bottom-8 bg-neutral-800 border border-neutral-700 rounded-lg shadow-xl py-1 min-w-[140px] z-10">
-                                    <button
-                                        onClick={() => { onEdit(); setShowMenu(false); }}
-                                        className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-300 hover:bg-neutral-700 transition-colors"
-                                    >
-                                        <Edit2 className="w-4 h-4" />
-                                        Editar plan
-                                    </button>
-                                    <button
-                                        onClick={() => { onDelete(); setShowMenu(false); }}
-                                        className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-400 hover:bg-neutral-700 transition-colors"
-                                    >
-                                        <Trash2 className="w-4 h-4" />
-                                        Eliminar
-                                    </button>
-                                </div>
-                            </>
-                        )}
-                    </div>
-                </div>
-            </CardContent>
-        </Card>
+            <span className={isActive ? "absolute inset-y-2 left-0 w-0.5 rounded-full bg-green-500" : "absolute inset-y-2 left-0 w-0.5 rounded-full bg-gray-600"} />
+        </article>
     );
 }
 
@@ -330,73 +332,72 @@ export function MembershipsPage() {
     }
 
     return (
-        <div className="space-y-8">
-            <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                    <h1 className="text-2xl font-bold text-white sm:text-3xl">Membresías</h1>
-                    <p className="text-gray-400">Gestiona los planes de tu gimnasio</p>
+        <div className="flex h-[calc(100dvh-6rem)] min-w-0 flex-col gap-3 sm:h-auto sm:min-h-0 sm:gap-4">
+            <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                    <div className="flex items-baseline gap-2">
+                        <h1 className="text-xl font-bold tracking-tight text-white sm:text-2xl">Membresías</h1>
+                        <span className="text-xs font-medium text-gray-500">{memberships.length} planes</span>
+                    </div>
+                    <p className="hidden text-sm text-gray-400 sm:block">Precios, duración y miembros por plan</p>
                 </div>
-                <Button onClick={() => setShowCreateModal(true)} className="w-full bg-green-600 hover:bg-green-700 sm:w-auto">
-                    <Plus className="mr-2 h-4 w-4" /> Nueva membresía
+                <Button
+                    onClick={() => setShowCreateModal(true)}
+                    aria-label="Crear nueva membresía"
+                    className="h-9 shrink-0 bg-green-600 px-3 text-sm font-semibold hover:bg-green-700"
+                >
+                    <Plus className="mr-1.5 h-4 w-4" /> Nuevo
                 </Button>
             </div>
 
             {memberships.length === 0 ? (
-                <div className="text-center py-12 bg-neutral-900/50 rounded-xl border border-neutral-800">
-                    <h3 className="text-xl font-medium text-white mb-2">No hay membresías creadas</h3>
-                    <p className="text-gray-400 mb-6">Crea tu primer plan para comenzar a recibir miembros.</p>
-                    <Button onClick={() => setShowCreateModal(true)} variant="outline" className="border-green-600 text-green-500 hover:bg-green-600 hover:text-white">
-                        Crear Primer Plan
-                    </Button>
+                <div className="grid min-h-0 flex-1 place-items-center rounded-xl border border-white/10 bg-neutral-900/50 px-6 text-center">
+                    <div>
+                        <h3 className="text-lg font-semibold text-white">No hay membresías creadas</h3>
+                        <p className="mt-2 text-sm text-gray-500">Crea tu primer plan para comenzar a recibir miembros.</p>
+                        <Button onClick={() => setShowCreateModal(true)} variant="outline" className="mt-5 border-green-600 text-green-500 hover:bg-green-600 hover:text-white">
+                            Crear primer plan
+                        </Button>
+                    </div>
                 </div>
             ) : (
-                <div className="grid md:grid-cols-3 gap-6">
-                    {memberships.map((membership) => (
-                        <MembershipCard
-                            key={membership.id}
-                            membership={{
-                                ...membership,
-                                // Try exact match > normalized > fuzzy match
-                                activeMembers: (() => {
-                                    const name = membership.name;
-                                    const normalized = name.trim().toUpperCase();
+                <Card className="min-h-0 flex-1 overflow-hidden border-white/10 bg-neutral-900 sm:flex-none">
+                    <CardContent className="h-full divide-y divide-white/[0.07] overflow-y-auto overscroll-contain p-0 sm:max-h-[calc(100dvh-12rem)]">
+                        {[...memberships]
+                            .sort((a, b) => {
+                                const statusDifference = Number(a.status === 'inactive') - Number(b.status === 'inactive');
+                                return statusDifference !== 0
+                                    ? statusDifference
+                                    : Number(a.duration || 0) - Number(b.duration || 0) || a.name.localeCompare(b.name, 'es', { sensitivity: 'base' });
+                            })
+                            .map((membership) => (
+                                <MembershipRow
+                                    key={membership.id}
+                                    membership={{
+                                        ...membership,
+                                        activeMembers: (() => {
+                                            const name = membership.name;
+                                            const normalized = name.trim().toUpperCase();
+                                            if (memberCounts[name]) return memberCounts[name];
+                                            if (memberCounts[normalized]) return memberCounts[normalized];
 
-                                    // 1. Exact
-                                    if (memberCounts[name]) return memberCounts[name];
-
-                                    // 2. Normalized
-                                    if (memberCounts[normalized]) return memberCounts[normalized];
-
-                                    // 3. "Plan X" vs "X" (e.g., membership is "TRIMESTRAL", member is "Plan Trimestral")
-                                    // counts key might be "TRIMESTRAL" derived from "Plan Trimestral"
-
-                                    // 4. Reverse: membership "TRIMENSUAL" vs member "Plan Trimestral" -> NO MATCH
-                                    // We need to handle "Trimensual" vs "Trimestral" alias if needed, STRICTLY speaking users might use different words.
-
-                                    // Let's try to find if any key in counts "contains" the membership name or vice versa
-                                    const keys = Object.keys(memberCounts);
-                                    for (const key of keys) {
-                                        if (key.includes(normalized) || normalized.includes(key)) {
-                                            // Make sure it's not a false positive (e.g. "Plan" matches all)
-                                            if (key.length > 4 && normalized.length > 4) {
-                                                return memberCounts[key];
+                                            for (const key of Object.keys(memberCounts)) {
+                                                if ((key.includes(normalized) || normalized.includes(key)) && key.length > 4 && normalized.length > 4) {
+                                                    return memberCounts[key];
+                                                }
+                                                if (normalized === 'TRIMENSUAL' && key.includes('TRIMESTRAL')) return memberCounts[key];
+                                                if (normalized === 'BIMENSUAL' && key.includes('BIMESTRAL')) return memberCounts[key];
+                                                if (normalized === 'MENSUAL' && key.includes('MENSUAL')) return memberCounts[key];
                                             }
-                                        }
-
-                                        // Specific manual mappings based on common confusion
-                                        if (normalized === 'TRIMENSUAL' && key.includes('TRIMESTRAL')) return memberCounts[key];
-                                        if (normalized === 'BIMENSUAL' && key.includes('BIMESTRAL')) return memberCounts[key];
-                                        if (normalized === 'MENSUAL' && key.includes('MENSUAL')) return memberCounts[key];
-                                    }
-
-                                    return 0;
-                                })()
-                            }}
-                            onEdit={() => console.log('Edit:', membership.id)}
-                            onDelete={() => handleDeleteMembership(membership.id)}
-                        />
-                    ))}
-                </div>
+                                            return 0;
+                                        })()
+                                    }}
+                                    onEdit={() => console.log('Edit:', membership.id)}
+                                    onDelete={() => handleDeleteMembership(membership.id)}
+                                />
+                            ))}
+                    </CardContent>
+                </Card>
             )}
 
             {/* Create Membership Modal */}

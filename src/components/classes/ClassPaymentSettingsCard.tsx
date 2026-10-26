@@ -74,18 +74,20 @@ export function ClassPaymentSettingsCard() {
     };
 
     return <>
-        <section aria-labelledby="payment-owner-title" className="overflow-hidden rounded-xl border border-white/10 bg-neutral-900">
-            <div className="flex flex-wrap items-center justify-between gap-4 p-4 sm:p-5">
-                <div className="flex min-w-0 items-center gap-3">
-                    <div className={`grid h-10 w-10 shrink-0 place-items-center rounded-lg ${settings?.configured ? 'bg-emerald-400/10 text-emerald-300' : 'bg-amber-400/10 text-amber-300'}`}><WalletCards className="h-5 w-5" /></div>
+        <section aria-labelledby="payment-owner-title" className="overflow-hidden rounded-lg border border-white/10 bg-neutral-900">
+            <div className="flex items-center justify-between gap-3 p-3 sm:p-4">
+                <div className="flex min-w-0 items-center gap-2.5">
+                    <div className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${settings?.configured ? 'bg-emerald-400/10 text-emerald-300' : 'bg-amber-400/10 text-amber-300'}`}><WalletCards className="h-4 w-4" /></div>
                     <div className="min-w-0">
-                        <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-neutral-500">Turno de cobro</p>
-                        <h2 id="payment-owner-title" className="truncate font-semibold text-white">{loading ? 'Consultando responsable…' : settings?.configured ? settings.collectorName : 'Responsable sin configurar'}</h2>
-                        {!loading && settings?.configured && <p className="mt-0.5 text-xs text-neutral-400">Yape {displayPhone(settings.yapePhone)} · WhatsApp {displayPhone(settings.whatsappPhone)}</p>}
-                        {!loading && !settings?.configured && <p className="mt-0.5 text-xs text-amber-300">Configúralo antes de activar el aviso por WhatsApp.</p>}
+                        <div className="flex min-w-0 items-center gap-1.5">
+                            <p className="shrink-0 text-[9px] font-bold uppercase tracking-[0.14em] text-neutral-600">Turno</p>
+                            <h2 id="payment-owner-title" className="truncate text-sm font-semibold text-white">{loading ? 'Consultando…' : settings?.configured ? settings.collectorName : 'Sin configurar'}</h2>
+                        </div>
+                        {!loading && settings?.configured && <p className="mt-0.5 truncate text-[10px] text-neutral-500">Yape {displayPhone(settings.yapePhone)} · WhatsApp {displayPhone(settings.whatsappPhone)}</p>}
+                        {!loading && !settings?.configured && <p className="mt-0.5 truncate text-[10px] text-amber-300">Configura el responsable de cobros.</p>}
                     </div>
                 </div>
-                <Button type="button" variant="outline" disabled={loading} onClick={openEditor} className="border-neutral-700"><Pencil className="mr-2 h-4 w-4" />{settings?.configured ? 'Cambiar responsable' : 'Configurar cobros'}</Button>
+                <Button type="button" variant="outline" size="icon" disabled={loading} onClick={openEditor} aria-label={settings?.configured ? 'Cambiar responsable' : 'Configurar cobros'} className="h-9 w-9 shrink-0 border-neutral-700 bg-neutral-800"><Pencil className="h-4 w-4" /><span className="sr-only">{settings?.configured ? 'Cambiar responsable' : 'Configurar cobros'}</span></Button>
             </div>
             {error && !open && <p role="alert" className="border-t border-rose-400/15 bg-rose-400/5 px-4 py-2 text-xs text-rose-300">{error}</p>}
         </section>

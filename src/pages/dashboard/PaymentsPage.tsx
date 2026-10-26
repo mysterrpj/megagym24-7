@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Download, Plus, DollarSign, TrendingUp, TrendingDown, Calendar, Search, MoreVertical, CreditCard, FileText, Banknote, Landmark, Receipt, Send } from 'lucide-react';
+import { Download, Plus, DollarSign, TrendingUp, Calendar, Search, MoreVertical, CreditCard, FileText, Banknote, Landmark, Receipt, Send } from 'lucide-react';
 import { BarChart, Bar, XAxis, Tooltip, ResponsiveContainer, Cell, LabelList } from 'recharts';
 import { collection, query, orderBy, onSnapshot, doc, getDoc, updateDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
@@ -340,33 +340,127 @@ export function PaymentsPage() {
     });
 
     return (
-        <div className="space-y-6">
-            <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                    <h1 className="text-2xl font-bold text-white sm:text-3xl">Pagos y Facturación</h1>
-                    <p className="text-gray-400">Gestiona transacciones e historial financiero</p>
+        <div className="flex h-[calc(100dvh-6rem)] min-w-0 flex-col gap-3 md:h-auto md:min-h-0 md:gap-6">
+            <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                    <div className="flex items-baseline gap-2">
+                        <h1 className="text-xl font-bold tracking-tight text-white sm:text-2xl">Pagos</h1>
+                        <span className="text-xs font-medium text-gray-500">{stats.transaccionesLast30Days} últimos 30 días</span>
+                    </div>
+                    <p className="hidden text-sm text-gray-400 md:block">Transacciones, comprobantes e historial financiero</p>
                 </div>
-                <div className="flex w-full flex-wrap gap-2 sm:w-auto">
-                    <Button variant="outline" className="flex-1 border-neutral-700 text-gray-300 sm:flex-none">
-                        <Download className="mr-2 h-4 w-4" /> Exportar
+                <div className="flex shrink-0 gap-2">
+                    <Button variant="outline" size="icon" disabled aria-label="Exportar pagos, próximamente" className="hidden h-9 w-9 border-neutral-700 text-gray-500 md:inline-flex">
+                        <Download className="h-4 w-4" />
                     </Button>
                     <Button
-                        className="flex-1 bg-green-600 hover:bg-green-700 sm:flex-none"
+                        className="h-9 bg-green-600 px-3 text-sm font-semibold hover:bg-green-700"
                         onClick={() => setIsNewInvoiceOpen(true)}
                     >
-                        <Plus className="mr-2 h-4 w-4" /> Nueva Factura
+                        <Plus className="mr-1.5 h-4 w-4" /> Nuevo
                     </Button>
                 </div>
             </div>
 
-            {/* Stats Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            {/* Compact mobile payments view */}
+            <div className="flex min-h-0 flex-1 flex-col gap-2 md:hidden">
+                <div className="grid grid-cols-3 divide-x divide-white/[0.07] rounded-lg border border-white/10 bg-neutral-900 px-1 py-2.5">
+                    <div className="min-w-0 px-2 text-center">
+                        <p className="truncate text-base font-bold tabular-nums text-green-400">S/ {stats.totalRecaudado.toLocaleString()}</p>
+                        <p className="mt-0.5 text-[9px] text-gray-600">Recaudado</p>
+                    </div>
+                    <div className="min-w-0 px-2 text-center">
+                        <p className={`truncate text-base font-bold tabular-nums ${stats.pendiente > 0 ? 'text-amber-400' : 'text-white'}`}>S/ {stats.pendiente.toLocaleString()}</p>
+                        <p className="mt-0.5 text-[9px] text-gray-600">Pendiente</p>
+                    </div>
+                    <div className="min-w-0 px-2 text-center">
+                        <p className="text-base font-bold tabular-nums text-white">{stats.transaccionesLast30Days}</p>
+                        <p className="mt-0.5 text-[9px] text-gray-600">Pagos</p>
+                    </div>
+                </div>
+
+                <div className="flex gap-2">
+                    <div className="relative min-w-0 flex-1">
+                        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-600" />
+                        <Input
+                            aria-label="Buscar pagos por miembro"
+                            placeholder="Buscar miembro"
+                            value={searchTerm}
+                            onChange={(event) => setSearchTerm(event.target.value)}
+                            className="h-9 rounded-lg border-white/10 bg-neutral-900 pl-9 text-xs text-white placeholder:text-gray-600"
+                        />
+                    </div>
+                    <div className="grid shrink-0 grid-cols-3 rounded-lg border border-white/10 bg-neutral-900 p-0.5">
+                        {['Todos', 'Pagado', 'Pendiente'].map((status) => (
+                            <button
+                                type="button"
+                                key={status}
+                                aria-pressed={statusFilter === status}
+                                onClick={() => setStatusFilter(status)}
+                                className={`rounded px-2 py-1 text-[9px] font-semibold transition-colors ${statusFilter === status ? 'bg-green-500 text-neutral-950' : 'text-gray-600'}`}
+                            >
+                                {status === 'Pendiente' ? 'Deuda' : status}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+
+                <Card className="min-h-0 flex-1 overflow-hidden border-white/10 bg-neutral-900">
+                    <CardContent className="h-full divide-y divide-white/[0.07] overflow-y-auto overscroll-contain p-0">
+                        {loading ? (
+                            <div className="grid min-h-40 place-items-center text-sm text-gray-500">Cargando pagos…</div>
+                        ) : filteredTransactions.length === 0 ? (
+                            <div className="grid min-h-40 place-items-center px-6 text-center">
+                                <div>
+                                    <Receipt className="mx-auto h-6 w-6 text-gray-700" />
+                                    <p className="mt-2 text-sm font-semibold text-gray-300">No hay pagos para mostrar</p>
+                                    <p className="mt-1 text-xs text-gray-600">Cambia el filtro o realiza otra búsqueda.</p>
+                                </div>
+                            </div>
+                        ) : filteredTransactions.map((tx) => (
+                            <article key={tx.id} className="relative grid min-h-[4.75rem] grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 px-3 py-2.5 transition-colors hover:bg-white/[0.025]">
+                                <span className={`absolute inset-y-2 left-0 w-0.5 rounded-full ${tx.status === 'Pagado' ? 'bg-green-500' : tx.status === 'Pendiente' ? 'bg-amber-400' : 'bg-gray-600'}`} />
+                                <div className="min-w-0 pl-1">
+                                    <div className="flex min-w-0 items-center gap-1.5">
+                                        <p className="truncate text-sm font-semibold text-white">{tx.user}</p>
+                                        <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[8px] font-bold ${tx.status === 'Pagado' ? 'bg-green-500/10 text-green-400' : tx.status === 'Pendiente' ? 'bg-amber-500/10 text-amber-300' : 'bg-white/5 text-gray-400'}`}>{tx.status}</span>
+                                    </div>
+                                    <p className="mt-0.5 truncate text-[11px] text-gray-500">{tx.plan} · {tx.method}</p>
+                                    <p className="mt-0.5 truncate text-[9px] text-gray-600">{tx.date} · {tx.invoice}</p>
+                                </div>
+                                <p className="whitespace-nowrap text-sm font-bold tabular-nums text-white">S/ {tx.amount.toFixed(2)}</p>
+                                <div className="relative">
+                                    <button type="button" aria-label={`Acciones del pago de ${tx.user}`} aria-expanded={openMenuId === tx.id} onClick={() => setOpenMenuId(openMenuId === tx.id ? null : tx.id)} className="grid h-9 w-9 place-items-center rounded-lg text-gray-500 hover:bg-neutral-800 hover:text-white focus:outline-none focus:ring-2 focus:ring-green-500">
+                                        <MoreVertical className="h-4 w-4" />
+                                    </button>
+                                    {openMenuId === tx.id && (
+                                        <>
+                                            <button type="button" aria-label="Cerrar acciones" className="fixed inset-0 z-40 bg-black/40" onClick={() => setOpenMenuId(null)} />
+                                            <div className="fixed inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-50 rounded-xl border border-white/10 bg-neutral-900 p-1.5 shadow-2xl">
+                                                <button type="button" onClick={() => { setVoucherTx(tx); setOpenMenuId(null); }} className="flex w-full items-center gap-2 rounded-lg px-3 py-3 text-sm text-gray-200 hover:bg-neutral-800">
+                                                    <Receipt className="h-4 w-4 text-green-400" /> Ver o reenviar voucher
+                                                </button>
+                                                <button type="button" onClick={() => handleDeletePayment(tx.id)} className="flex w-full items-center gap-2 rounded-lg px-3 py-3 text-sm text-red-400 hover:bg-neutral-800">
+                                                    <MoreVertical className="h-4 w-4" /> Eliminar registro
+                                                </button>
+                                            </div>
+                                        </>
+                                    )}
+                                </div>
+                            </article>
+                        ))}
+                    </CardContent>
+                </Card>
+            </div>
+
+            {/* Desktop stats cards */}
+            <div className="hidden grid-cols-1 gap-4 md:grid md:grid-cols-3">
                 <Card className="bg-neutral-900 border-neutral-800 p-4">
                     <div className="flex justify-between items-start">
                         <div>
                             <p className="text-sm text-gray-400">Total Recaudado</p>
                             <h3 className="text-2xl font-bold text-white mt-1">
-                                ${stats.totalRecaudado.toLocaleString()}
+                                S/ {stats.totalRecaudado.toLocaleString()}
                             </h3>
                             <span className="text-xs text-green-500 flex items-center mt-1">
                                 <TrendingUp className="w-3 h-3 mr-1" /> Calculado de miembros
@@ -382,24 +476,12 @@ export function PaymentsPage() {
                         <div>
                             <p className="text-sm text-gray-400">Pendiente</p>
                             <h3 className="text-2xl font-bold text-yellow-500 mt-1">
-                                ${stats.pendiente.toLocaleString()}
+                                S/ {stats.pendiente.toLocaleString()}
                             </h3>
                             <p className="text-xs text-gray-500 mt-1">Deuda acumulada</p>
                         </div>
                         <div className="p-2 bg-yellow-500/10 rounded-lg text-yellow-500">
                             <FileText className="w-5 h-5" />
-                        </div>
-                    </div>
-                </Card>
-                <Card className="bg-neutral-900 border-neutral-800 p-4">
-                    <div className="flex justify-between items-start">
-                        <div>
-                            <p className="text-sm text-gray-400">Reembolsos</p>
-                            <h3 className="text-2xl font-bold text-white mt-1">$0</h3>
-                            <p className="text-xs text-gray-500 mt-1">No implementado</p>
-                        </div>
-                        <div className="p-2 bg-neutral-800 rounded-lg text-gray-400">
-                            <TrendingDown className="w-5 h-5" />
                         </div>
                     </div>
                 </Card>
@@ -417,8 +499,8 @@ export function PaymentsPage() {
                 </Card>
             </div>
 
-            {/* Chart */}
-            <Card className="bg-neutral-900 border-neutral-800">
+            {/* Desktop chart */}
+            <Card className="hidden bg-neutral-900 border-neutral-800 md:block">
                 <CardHeader className="flex flex-row items-center justify-between pb-8">
                     <CardTitle className="text-white text-lg">Ingresos Mensuales</CardTitle>
                     <span className="text-xs bg-green-500/10 text-green-500 px-2 py-1 rounded-full">Últimos 6 meses</span>
@@ -431,14 +513,14 @@ export function PaymentsPage() {
                                 contentStyle={{ backgroundColor: '#171717', border: '1px solid #262626' }}
                                 itemStyle={{ color: '#fff' }}
                                 cursor={{ fill: '#262626' }}
-                                formatter={(value: any) => [`$${Number(value).toLocaleString()}`, 'Ingresos']}
+                                formatter={(value: any) => [`S/ ${Number(value).toLocaleString()}`, 'Ingresos']}
                             />
                             <Bar dataKey="total" radius={[4, 4, 0, 0]}>
                                 <LabelList
                                     dataKey="total"
                                     position="bottom"
                                     offset={20}
-                                    formatter={(value: unknown) => `$${Number(value).toLocaleString()}`}
+                                    formatter={(value: unknown) => `S/ ${Number(value).toLocaleString()}`}
                                     style={{ fill: '#9ca3af', fontSize: 11 }}
                                 />
                                 {chartData.map((_entry, index) => (
@@ -450,8 +532,8 @@ export function PaymentsPage() {
                 </CardContent>
             </Card>
 
-            {/* Transactions Table */}
-            <Card className="bg-neutral-900 border-neutral-800">
+            {/* Desktop transactions table */}
+            <Card className="hidden bg-neutral-900 border-neutral-800 md:block">
                 <CardHeader className="space-y-4">
                     {/* Tabs */}
                     <div className="flex gap-2">
@@ -535,7 +617,7 @@ export function PaymentsPage() {
                                             </div>
                                         </td>
                                         <td className="px-6 py-4">{tx.plan}</td>
-                                        <td className="px-6 py-4 font-bold text-white">${tx.amount}</td>
+                                        <td className="px-6 py-4 font-bold text-white">S/ {tx.amount.toFixed(2)}</td>
                                         <td className="px-6 py-4">{tx.date}</td>
                                         <td className="px-6 py-4">
                                             <div className="flex items-center gap-2">

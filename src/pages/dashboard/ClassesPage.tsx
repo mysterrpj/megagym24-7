@@ -10,7 +10,7 @@ import { ClassPaymentSettingsCard } from '@/components/classes/ClassPaymentSetti
 import { Button } from '@/components/ui/button';
 
 interface ClassDoc extends AdminClass { color: string }
-type CalendarMode = 'proximos' | 'semana' | 'dia';
+type CalendarMode = 'semana' | 'dia';
 
 // Existing day values are 1=lunes; explicit dayIndex / weekday remains 0=lunes.
 function normalizeClass(raw: Record<string, any>, id: string): ClassDoc {
@@ -44,7 +44,7 @@ export function ClassesPage() {
     const today = useMemo(() => startOfDay(new Date()), []);
     const todayKey = format(today, 'yyyy-MM-dd');
     const [currentDate, setCurrentDate] = useState(today);
-    const [calendarMode, setCalendarMode] = useState<CalendarMode>('proximos');
+    const [calendarMode, setCalendarMode] = useState<CalendarMode>('dia');
     const [selectedDate, setSelectedDate] = useState(todayKey);
     const [selectedClassId, setSelectedClassId] = useState<string | null>(null);
     const [selectedOccurrenceDate, setSelectedOccurrenceDate] = useState('');
@@ -81,9 +81,7 @@ export function ClassesPage() {
         return () => { stopClasses(); stopBookings(); stopMembers(); };
     }, [retry]);
 
-    const rangeStart = calendarMode === 'proximos'
-        ? startOfDay(currentDate)
-        : startOfWeek(currentDate, { weekStartsOn: 1 });
+    const rangeStart = startOfWeek(currentDate, { weekStartsOn: 1 });
     const visibleDays = useMemo(
         () => Array.from({ length: 7 }, (_, index) => addDays(rangeStart, index)),
         [rangeStart.getTime()]
@@ -113,15 +111,6 @@ export function ClassesPage() {
 
     const legacyCount = bookings.filter((booking) => !booking.date && isActiveBooking(booking)).length;
     const getOccurrenceBookings = (item: ClassDoc, date: string) => usingDemoData ? [] : (occurrenceBookingsMap.get(`${item.id}_${date}`) ?? []);
-    const visibleOccurrences = visibleDays.flatMap((day) => {
-        const dateKey = format(day, 'yyyy-MM-dd');
-        return activeClasses
-            .filter((item) => item.day === weekdayIndex(day))
-            .map((item) => ({ item, dateKey, bookings: getOccurrenceBookings(item, dateKey) }));
-    });
-    const totalCapacity = visibleOccurrences.reduce((sum, occurrence) => sum + Math.min(21, occurrence.item.capacity), 0);
-    const totalBookings = visibleOccurrences.reduce((sum, occurrence) => sum + occurrence.bookings.length, 0);
-    const pendingInRange = visibleOccurrences.reduce((sum, occurrence) => sum + occurrence.bookings.filter(isPendingPayment).length, 0);
     const nextActiveDate = visibleDays.find((day) =>
         format(day, 'yyyy-MM-dd') >= todayKey && activeClasses.some((item) => item.day === weekdayIndex(day))
     );
@@ -129,6 +118,18 @@ export function ClassesPage() {
     const activeSelectedDate = visibleDays.some((day) => format(day, 'yyyy-MM-dd') === selectedDate)
         ? selectedDate
         : (nextActiveDateKey || format(visibleDays[0], 'yyyy-MM-dd'));
+    const compactOccurrences = visibleDays.flatMap((day) => {
+        const dateKey = format(day, 'yyyy-MM-dd');
+        if (calendarMode === 'dia' && activeSelectedDate !== dateKey) return [];
+        return classes
+            .filter((item) => item.day === weekdayIndex(day))
+            .map((item) => ({ item, day, dateKey, bookings: getOccurrenceBookings(item, dateKey) }));
+    });
+    const contextualOccurrences = compactOccurrences.filter(({ item }) => item.status === 'active');
+    const contextualCapacity = contextualOccurrences.reduce((sum, occurrence) => sum + Math.min(21, occurrence.item.capacity), 0);
+    const contextualBookings = contextualOccurrences.reduce((sum, occurrence) => sum + occurrence.bookings.length, 0);
+    const contextualPending = contextualOccurrences.reduce((sum, occurrence) => sum + occurrence.bookings.filter(isPendingPayment).length, 0);
+    const occupancyPercentage = contextualCapacity ? Math.round(contextualBookings / contextualCapacity * 100) : 0;
     const ready = usingDemoData || (loaded.classes && loaded.bookings && loaded.members && !Object.keys(errors).length);
 
     const closeEditor = () => {
@@ -157,26 +158,38 @@ export function ClassesPage() {
     };
     const chooseMode = (mode: CalendarMode) => {
         setCalendarMode(mode);
-        if (mode === 'proximos') {
-            setCurrentDate(today);
-            setSelectedDate(nextActiveDateKey || todayKey);
-        } else if (mode === 'dia') {
-            setSelectedDate(nextActiveDateKey || activeSelectedDate);
+        if (mode === 'dia') setSelectedDate(activeSelectedDate || todayKey);
+    };
+    const shiftCalendar = (direction: -1 | 1) => {
+        if (calendarMode === 'dia') {
+            const nextDate = addDays(parseISO(activeSelectedDate), direction);
+            setCurrentDate(nextDate);
+            setSelectedDate(format(nextDate, 'yyyy-MM-dd'));
+            return;
         }
+        setCurrentDate((date) => addDays(date, direction * 7));
     };
     const returnToToday = () => {
-        setCalendarMode('proximos');
+        setCalendarMode('dia');
         setCurrentDate(today);
-        setSelectedDate(nextActiveDateKey || todayKey);
+        setSelectedDate(todayKey);
     };
 
-    const rangeLabel = `${format(visibleDays[0], 'd MMM', { locale: es })} – ${format(visibleDays[6], 'd MMM yyyy', { locale: es })}`;
-    const statsLabel = calendarMode === 'proximos' ? 'próximos 7 días' : 'período';
+    const rangeLabel = calendarMode === 'dia'
+        ? format(parseISO(activeSelectedDate), "EEEE d 'de' MMMM yyyy", { locale: es })
+        : `${format(visibleDays[0], 'd MMM', { locale: es })} – ${format(visibleDays[6], 'd MMM yyyy', { locale: es })}`;
+    const statsLabel = calendarMode === 'dia' ? 'día seleccionado' : 'semana';
 
-    return <div className="space-y-6">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-            <div><h1 className="text-3xl font-bold text-white">Clases</h1><p className="mt-1 text-sm text-neutral-400">Pagos pendientes, próximas clases y reservas por fecha en un mismo lugar.</p></div>
-            <Button disabled={!ready || usingDemoData} onClick={() => setShowCreateModal(true)} className="bg-green-600 hover:bg-green-700"><Plus className="mr-2 h-4 w-4" />Nueva clase</Button>
+    return <div className="flex h-[calc(100dvh-6rem)] min-w-0 flex-col gap-3 sm:h-auto sm:min-h-0 sm:gap-4">
+        <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+                <div className="flex items-baseline gap-2">
+                    <h1 className="text-xl font-bold tracking-tight text-white sm:text-2xl">Clases</h1>
+                    <span className="text-xs font-medium text-neutral-500">{contextualOccurrences.length} {calendarMode === 'dia' ? (activeSelectedDate === todayKey ? 'hoy' : 'ese día') : 'esta semana'}</span>
+                </div>
+                <p className="hidden text-sm text-neutral-400 sm:block">Agenda, reservas y pagos por verificar</p>
+            </div>
+            <Button disabled={!ready || usingDemoData} onClick={() => setShowCreateModal(true)} aria-label="Crear nueva clase" className="h-9 shrink-0 bg-green-600 px-3 text-sm font-semibold hover:bg-green-700"><Plus className="mr-1.5 h-4 w-4" />Nueva</Button>
         </div>
 
         {!usingDemoData && <ClassPaymentSettingsCard />}
@@ -185,15 +198,110 @@ export function ClassesPage() {
         {!ready && !Object.keys(errors).length && <p role="status" className="text-sm text-neutral-400">Cargando clases y reservas…</p>}
         {!usingDemoData && loaded.bookings && legacyCount > 0 && <div role="status" className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-4 text-sm text-amber-300">Hay {legacyCount} reserva(s) antiguas sin fecha. No se incluyen en los mapas ni en los conteos por fecha. Revísalas manualmente antes de cambiar horarios; no se migran automáticamente.</div>}
 
-        <div className="flex flex-wrap items-center gap-4 text-sm text-neutral-400">
-            <label className="flex items-center gap-2"><input type="checkbox" checked={showInactive} onChange={(event) => setShowInactive(event.target.checked)} className="accent-green-600" />Mostrar inactivas</label>
-            <Button variant="ghost" onClick={() => { closeEditor(); setUsingDemoData((old) => !old); }}>{usingDemoData ? 'Salir de demostración' : 'Ver demostración'}</Button>
-            {usingDemoData && <span className="text-amber-300">Demostración explícita · solo lectura · sin reservas reales</span>}
+        <div className="flex items-center justify-between gap-2 text-xs text-neutral-500">
+            <label className="flex min-h-8 cursor-pointer items-center gap-2 rounded-lg border border-white/[0.07] bg-neutral-900 px-2.5">
+                <input type="checkbox" checked={showInactive} onChange={(event) => setShowInactive(event.target.checked)} className="h-3.5 w-3.5 accent-green-600" />
+                Inactivas
+            </label>
+            <Button variant="ghost" size="sm" className="h-8 px-2.5 text-xs text-neutral-500" onClick={() => { closeEditor(); setUsingDemoData((old) => !old); }}>{usingDemoData ? 'Salir de demo' : 'Demostración'}</Button>
+            {usingDemoData && <span className="hidden text-amber-300 sm:inline">Solo lectura · sin reservas reales</span>}
         </div>
 
         {ready && <>
+            {/* Mobile operational view */}
+            <div className="flex min-h-0 flex-1 flex-col gap-2 md:hidden">
+                <div className="grid grid-cols-4 divide-x divide-white/[0.07] rounded-lg border border-white/10 bg-neutral-900 px-1 py-2">
+                    {[
+                        [calendarMode === 'dia' ? 'Clases' : 'Semana', contextualOccurrences.length],
+                        ['Reservas', contextualBookings],
+                        ['Pendientes', pendingPayments.length],
+                        ['Ocupación', `${occupancyPercentage}%`],
+                    ].map(([label, value]) => (
+                        <div key={label} className="min-w-0 px-1.5 text-center">
+                            <p className={`text-base font-bold tabular-nums ${label === 'Pendientes' && Number(value) > 0 ? 'text-amber-300' : 'text-white'}`}>{value}</p>
+                            <p className="truncate text-[9px] text-neutral-600">{label}</p>
+                        </div>
+                    ))}
+                </div>
+
+                <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-white/10 bg-neutral-900">
+                    <div className="flex shrink-0 items-center gap-1.5 border-b border-white/[0.07] p-2">
+                        <div className="grid min-w-0 flex-1 grid-cols-2 rounded-md bg-neutral-950 p-0.5">
+                            {([
+                                ['dia', 'Día'],
+                                ['semana', 'Semana'],
+                            ] as Array<[CalendarMode, string]>).map(([mode, label]) => (
+                                <button key={mode} type="button" aria-pressed={calendarMode === mode} onClick={() => chooseMode(mode)} className={`rounded px-1.5 py-1.5 text-[10px] font-semibold transition-colors ${calendarMode === mode ? 'bg-neutral-800 text-white' : 'text-neutral-600'}`}>{label}</button>
+                            ))}
+                        </div>
+                        <button type="button" aria-label={calendarMode === 'dia' ? 'Día anterior' : 'Semana anterior'} onClick={() => shiftCalendar(-1)} className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-neutral-500 hover:bg-neutral-800 hover:text-white"><ChevronLeft className="h-4 w-4" /></button>
+                        <button type="button" aria-label="Volver a hoy" onClick={returnToToday} className="h-8 shrink-0 rounded-md px-2 text-[10px] font-bold text-green-400 hover:bg-green-500/10">Hoy</button>
+                        <button type="button" aria-label={calendarMode === 'dia' ? 'Día siguiente' : 'Semana siguiente'} onClick={() => shiftCalendar(1)} className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-neutral-500 hover:bg-neutral-800 hover:text-white"><ChevronRight className="h-4 w-4" /></button>
+                    </div>
+
+                    <div className="min-h-0 flex-1 divide-y divide-white/[0.07] overflow-y-auto overscroll-contain">
+                        {!usingDemoData && pendingPayments.length > 0 && (
+                            <div className="bg-amber-400/[0.04]">
+                                <p className="px-3 pt-2.5 text-[9px] font-bold uppercase tracking-[0.16em] text-amber-300">Pagos por verificar</p>
+                                {pendingPayments.map(({ booking, classItem }) => {
+                                    const member = members.find((item) => item.id === booking.memberId);
+                                    return (
+                                        <button key={booking.id} type="button" onClick={() => reviewPendingPayment(booking, classItem)} className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left hover:bg-amber-400/[0.06]">
+                                            <div className="min-w-0">
+                                                <p className="truncate text-xs font-semibold text-white">{booking.memberName || member?.name || 'Cliente'}</p>
+                                                <p className="mt-0.5 truncate text-[10px] text-neutral-500">{classItem.name} · {booking.date} · {classItem.time}</p>
+                                            </div>
+                                            <span className="shrink-0 rounded bg-amber-400/10 px-2 py-1 font-mono text-[10px] font-bold text-amber-200">{booking.operationCode || 'Sin código'}</span>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        )}
+
+                        {compactOccurrences.length === 0 ? (
+                            <div className="grid min-h-40 place-items-center px-6 text-center">
+                                <div>
+                                    <CalendarClock className="mx-auto h-6 w-6 text-neutral-700" />
+                                    <p className="mt-2 text-sm font-semibold text-neutral-300">No hay clases en este período</p>
+                                    <p className="mt-1 text-xs text-neutral-600">Cambia el período o crea una clase nueva.</p>
+                                </div>
+                            </div>
+                        ) : compactOccurrences.map(({ item, day, dateKey, bookings: occurrence }) => {
+                            const pending = occurrence.filter(isPendingPayment).length;
+                            const capacity = Math.min(21, item.capacity);
+                            const occupancy = capacity ? occurrence.length / capacity : 0;
+                            const isInactive = item.status !== 'active';
+                            const stripe = isInactive ? 'bg-neutral-600' : occupancy >= 1 ? 'bg-red-500' : occupancy >= 0.8 || pending > 0 ? 'bg-amber-400' : 'bg-green-500';
+                            const isToday = dateKey === todayKey;
+                            return (
+                                <button key={`${item.id}-${dateKey}`} type="button" onClick={() => openClass(item, day)} className="relative grid min-h-[4.6rem] w-full grid-cols-[3.1rem_minmax(0,1fr)_auto] items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-white/[0.025] focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-green-500">
+                                    <span className={`absolute inset-y-2 left-0 w-0.5 rounded-full ${stripe}`} />
+                                    <div className="text-center">
+                                        <p className={`text-[9px] font-bold uppercase ${isToday ? 'text-green-400' : 'text-neutral-600'}`}>{isToday ? 'Hoy' : format(day, 'EEE', { locale: es })}</p>
+                                        <p className="mt-0.5 text-lg font-bold tabular-nums text-neutral-300">{format(day, 'd')}</p>
+                                    </div>
+                                    <div className="min-w-0">
+                                        <div className="flex min-w-0 items-center gap-1.5">
+                                            <p className="truncate text-sm font-semibold text-white">{item.name}</p>
+                                            {isInactive && <span className="shrink-0 rounded-full bg-white/5 px-1.5 py-0.5 text-[8px] font-bold text-neutral-500">Inactiva</span>}
+                                        </div>
+                                        <p className="mt-0.5 truncate text-[11px] text-neutral-500">{item.time} · {item.duration} min · {item.instructor}</p>
+                                        {pending > 0 && <p className="mt-0.5 text-[9px] font-semibold text-amber-300">{pending} pago{pending !== 1 ? 's' : ''} pendiente{pending !== 1 ? 's' : ''}</p>}
+                                    </div>
+                                    <div className="text-right">
+                                        <p className="text-xs font-bold tabular-nums text-neutral-300">{occurrence.length}/{capacity}</p>
+                                        <p className="mt-0.5 text-[9px] text-neutral-600">reservas</p>
+                                    </div>
+                                </button>
+                            );
+                        })}
+                    </div>
+                    <div className="shrink-0 border-t border-white/[0.07] px-3 py-2 text-center text-[10px] text-neutral-600">{rangeLabel}</div>
+                </section>
+            </div>
+
             {!usingDemoData && pendingPayments.length > 0 && (
-                <section aria-labelledby="pending-payments-title" className="overflow-hidden rounded-xl border border-amber-400/25 bg-amber-400/[0.06]">
+                <section aria-labelledby="pending-payments-title" className="hidden overflow-hidden rounded-xl border border-amber-400/25 bg-amber-400/[0.06] md:block">
                     <header className="flex flex-wrap items-center justify-between gap-3 border-b border-amber-400/15 px-4 py-4 sm:px-5">
                         <div className="flex items-center gap-3">
                             <div className="rounded-lg bg-amber-400/10 p-2 text-amber-300"><AlertTriangle className="h-5 w-5" /></div>
@@ -230,34 +338,33 @@ export function ClassesPage() {
             )}
 
             {!usingDemoData && pendingPayments.length === 0 && (
-                <div className="flex items-center gap-3 rounded-lg border border-emerald-500/15 bg-emerald-500/5 px-4 py-3 text-sm text-emerald-300">
+                <div className="hidden items-center gap-3 rounded-lg border border-emerald-500/15 bg-emerald-500/5 px-4 py-3 text-sm text-emerald-300">
                     <span className="h-2 w-2 rounded-full bg-emerald-400" />No hay pagos de clases pendientes de verificar.
                 </div>
             )}
 
-            {!classes.length && <div className="rounded-lg border border-neutral-800 bg-neutral-900 p-6 text-neutral-400">No hay clases {showInactive ? 'registradas' : 'activas'}. Crea una clase o muestra las inactivas para reactivarlas.</div>}
+            {!classes.length && <div className="hidden rounded-lg border border-neutral-800 bg-neutral-900 p-6 text-neutral-400 md:block">No hay clases {showInactive ? 'registradas' : 'activas'}. Crea una clase o muestra las inactivas para reactivarlas.</div>}
 
-            <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">{[
-                [`Clases / ${statsLabel}`, visibleOccurrences.length],
-                [`Reservas / ${statsLabel}`, totalBookings],
-                ['Pagos pendientes', pendingInRange],
-                ['Ocupación', `${totalCapacity ? Math.round(totalBookings / totalCapacity * 100) : 0}%`],
+            <div className="hidden grid-cols-2 gap-4 md:grid lg:grid-cols-4">{[
+                [`Clases / ${statsLabel}`, contextualOccurrences.length],
+                [`Reservas / ${statsLabel}`, contextualBookings],
+                ['Pagos pendientes', contextualPending],
+                ['Ocupación', `${occupancyPercentage}%`],
             ].map(([label, value]) => <div key={label} className="rounded-lg border border-neutral-800 bg-neutral-900 p-4"><p className="text-xs text-neutral-400">{label}</p><p className={`mt-2 text-2xl font-semibold tabular-nums ${label === 'Pagos pendientes' && Number(value) > 0 ? 'text-amber-300' : 'text-white'}`}>{value}</p></div>)}</div>
 
-            <section className="overflow-hidden rounded-lg border border-neutral-800 bg-neutral-900">
+            <section className="hidden overflow-hidden rounded-lg border border-neutral-800 bg-neutral-900 md:block">
                 <div className="flex flex-wrap items-center justify-between gap-4 border-b border-neutral-800 p-4">
                     <div className="flex flex-wrap gap-1 rounded-md bg-neutral-950 p-1">
                         {([
-                            ['proximos', 'Próximos 7 días'],
-                            ['semana', 'Semana'],
                             ['dia', 'Día'],
+                            ['semana', 'Semana'],
                         ] as Array<[CalendarMode, string]>).map(([mode, label]) => <Button key={mode} variant="ghost" size="sm" aria-pressed={calendarMode === mode} className={calendarMode === mode ? 'bg-neutral-800 text-white' : 'text-neutral-400'} onClick={() => chooseMode(mode)}>{label}</Button>)}
                     </div>
                     <div className="flex items-center gap-2">
                         <Button variant="ghost" size="sm" onClick={returnToToday} className="text-green-300">Hoy</Button>
-                        <Button variant="ghost" size="icon" aria-label="Período anterior" onClick={() => setCurrentDate(addDays(currentDate, -7))}><ChevronLeft className="h-4 w-4" /></Button>
-                        <span className="min-w-36 text-center text-sm text-neutral-300">{rangeLabel}</span>
-                        <Button variant="ghost" size="icon" aria-label="Período siguiente" onClick={() => setCurrentDate(addDays(currentDate, 7))}><ChevronRight className="h-4 w-4" /></Button>
+                        <Button variant="ghost" size="icon" aria-label={calendarMode === 'dia' ? 'Día anterior' : 'Semana anterior'} onClick={() => shiftCalendar(-1)}><ChevronLeft className="h-4 w-4" /></Button>
+                        <span className="min-w-36 text-center text-sm capitalize text-neutral-300">{rangeLabel}</span>
+                        <Button variant="ghost" size="icon" aria-label={calendarMode === 'dia' ? 'Día siguiente' : 'Semana siguiente'} onClick={() => shiftCalendar(1)}><ChevronRight className="h-4 w-4" /></Button>
                     </div>
                 </div>
 
