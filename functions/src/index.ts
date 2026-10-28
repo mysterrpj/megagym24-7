@@ -54,7 +54,31 @@ function buildPhoneFormats(phone: string) {
     ]));
 }
 
+function normalizeWhatsappRecipient(phone: string) {
+    const raw = String(phone || '').trim().replace(/^whatsapp:/i, '');
+    const digits = raw.replace(/\D/g, '');
+
+    if (digits.length === 9) return `+51${digits}`;
+    if (digits.length === 11 && digits.startsWith('51')) return `+${digits}`;
+    if (raw.startsWith('+') && digits.length >= 10 && digits.length <= 15) return `+${digits}`;
+
+    throw new functions.https.HttpsError(
+        'invalid-argument',
+        'El teléfono del cliente no tiene un formato válido para WhatsApp.'
+    );
+}
+
 async function findMemberByPhone(db: any, phone: string) {
+    const digits = String(phone || '').replace(/\D/g, '');
+    const normalizedPhone = digits.startsWith('51') && digits.length === 11 ? digits.slice(2) : digits;
+    if (normalizedPhone) {
+        const normalizedSnap = await db.collection('members')
+            .where('phoneNormalized', '==', normalizedPhone)
+            .limit(1)
+            .get();
+        if (!normalizedSnap.empty) return normalizedSnap.docs[0];
+    }
+
     for (const fmt of buildPhoneFormats(phone)) {
         const snap = await db.collection('members').where('phone', '==', fmt).limit(1).get();
         if (!snap.empty) return snap.docs[0];
@@ -849,6 +873,59 @@ export const createCulqiCharge = functions
                                 })
                             });
                             console.log(`Member updated: ${memberDoc.id}`);
+
+                            const voucher = [
+                                '━━━━━━━━━━━━━━━━━━━━━',
+                                '🏋️ *MEGAGYM* 🏋️',
+                                '   COMPROBANTE DE PAGO',
+                                '━━━━━━━━━━━━━━━━━━━━━',
+                                `👤 Cliente: ${String(memberData.name || 'Cliente').toUpperCase()}`,
+                                `📋 Plan: ${renewal.plan}`,
+                                '💳 Método: Culqi',
+                                `💰 Monto: S/ ${paidAmount.toFixed(2)}`,
+                                `📅 Inicio: ${renewal.startDate}`,
+                                `📅 Vigencia hasta: ${renewal.endDate}`,
+                                ...(Number(renewal.debt) > 0 ? [`⚠️ Saldo pendiente: S/ ${Number(renewal.debt).toFixed(2)}`] : []),
+                                `🔖 Operación: ${String(charge.id).slice(-10).toUpperCase()}`,
+                                '━━━━━━━━━━━━━━━━━━━━━',
+                                '¡Gracias por entrenar con nosotros! 💪'
+                            ].join('\n');
+
+                            try {
+                                const whatsappPhone = normalizeWhatsappRecipient(memberData.phone || phone);
+                                const twilioClientObj = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+                                const whatsappMessage = await twilioClientObj.messages.create({
+                                    from: 'whatsapp:+51907935299',
+                                    to: `whatsapp:${whatsappPhone}`,
+                                    body: voucher
+                                });
+
+                                await db.collection('messages').add({
+                                    phone: whatsappPhone,
+                                    content: voucher,
+                                    direction: 'outbound',
+                                    timestamp: adminInner.firestore.FieldValue.serverTimestamp(),
+                                    source: 'culqi_payment_voucher',
+                                    twilioMessageSid: whatsappMessage.sid,
+                                    paymentReference: charge.id
+                                });
+                                await memberDoc.ref.update({
+                                    lastVoucherQueuedAt: adminInner.firestore.FieldValue.serverTimestamp(),
+                                    lastVoucherPaymentReference: charge.id
+                                });
+                            } catch (voucherError: any) {
+                                console.error('createCulqiCharge: payment approved but voucher could not be queued', {
+                                    memberId: memberDoc.id,
+                                    chargeId: charge.id,
+                                    code: voucherError?.code,
+                                    message: voucherError?.message
+                                });
+                                await memberDoc.ref.update({
+                                    lastVoucherErrorAt: adminInner.firestore.FieldValue.serverTimestamp(),
+                                    lastVoucherErrorCode: String(voucherError?.code || 'unknown'),
+                                    lastVoucherPaymentReference: charge.id
+                                });
+                            }
                         } else {
                             console.warn(`No member found for phone: ${phone}`);
                         }
@@ -889,22 +966,45 @@ export const sendManualWhatsAppMessage = functions
         const content = String(data?.content || '').trim();
 
         if (!phone) {
-            throw new functions.https.HttpsError('invalid-argument', 'Phone is required.');
+            throw new functions.https.HttpsError('invalid-argument', 'El pago no tiene un teléfono registrado.');
         }
 
         if (!content) {
-            throw new functions.https.HttpsError('invalid-argument', 'Message content is required.');
+            throw new functions.https.HttpsError('invalid-argument', 'El voucher no tiene contenido para enviar.');
         }
 
-        const twilioClient = require('twilio')(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-        await twilioClient.messages.create({
-            from: 'whatsapp:+51907935299',
-            to: `whatsapp:${phone}`,
-            body: content
-        });
+        const whatsappPhone = normalizeWhatsappRecipient(phone);
+        const accountSid = String(process.env.TWILIO_ACCOUNT_SID || '');
+        const authToken = String(process.env.TWILIO_AUTH_TOKEN || '');
+        if (!accountSid || !authToken) {
+            throw new functions.https.HttpsError('failed-precondition', 'La integración de WhatsApp no está configurada.');
+        }
+
+        const twilioClient = require('twilio')(accountSid, authToken);
+        try {
+            await twilioClient.messages.create({
+                from: 'whatsapp:+51907935299',
+                to: `whatsapp:${whatsappPhone}`,
+                body: content
+            });
+        } catch (error: any) {
+            console.error('sendManualWhatsAppMessage Twilio error:', {
+                code: error?.code,
+                message: error?.message,
+                recipient: whatsappPhone
+            });
+
+            if (error?.code === 21211 || error?.code === 21614) {
+                throw new functions.https.HttpsError('invalid-argument', 'El teléfono del cliente no es válido para WhatsApp.');
+            }
+            if (error?.code === 63016) {
+                throw new functions.https.HttpsError('failed-precondition', 'La clienta debe escribir primero al WhatsApp de MegaGym para abrir la conversación.');
+            }
+            throw new functions.https.HttpsError('internal', 'Twilio no pudo enviar el voucher. Intenta nuevamente.');
+        }
 
         await db.collection('messages').add({
-            phone,
+            phone: whatsappPhone,
             content,
             direction: 'outbound',
             timestamp: adminInner.firestore.FieldValue.serverTimestamp(),

@@ -2,11 +2,11 @@ import { useState, useRef, useEffect } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Search, UserPlus, Mail, Phone, MoreHorizontal, ChevronLeft, ChevronRight, X, CreditCard, Edit, Trash, Loader2, Banknote, Dumbbell, ExternalLink, ToggleLeft, ToggleRight, AlertTriangle } from 'lucide-react';
+import { Search, UserPlus, Mail, Phone, MoreHorizontal, ChevronLeft, ChevronRight, X, CreditCard, Edit, Trash, Loader2, Banknote, Dumbbell, ExternalLink, ToggleLeft, ToggleRight, AlertTriangle, CheckCircle2, Receipt } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { httpsCallable } from 'firebase/functions';
 import { functions, db } from '@/lib/firebase';
-import { collection, onSnapshot, query, orderBy, where, addDoc, updateDoc, doc, deleteDoc, getDoc, getDocs, serverTimestamp, arrayUnion } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, where, addDoc, updateDoc, doc, deleteDoc, getDoc, getDocs, serverTimestamp, arrayUnion, writeBatch } from 'firebase/firestore';
 
 // Type definitions
 interface Member {
@@ -55,6 +55,23 @@ interface MembershipPeriod {
     payments: MembershipPaymentRecord[];
     createdAt: string;
 }
+
+interface RegistrationVoucher {
+    memberName: string;
+    phone: string;
+    plan: string;
+    amount: number;
+    method: string;
+    date: Date;
+    invoice: string;
+    debt: number;
+}
+
+const PAYMENT_METHOD_LABELS: Record<string, string> = {
+    efectivo: 'Efectivo',
+    transferencia: 'Transferencia',
+    yape: 'Yape / Plin'
+};
 
 const PLAN_OPTIONS = [
     { name: 'Plan Interdiario', price: 50, days: 30 },
@@ -132,6 +149,30 @@ function WhatsAppIcon({ className = '' }: { className?: string }) {
         </svg>
     );
 }
+
+const formatRegistrationVoucher = (voucher: RegistrationVoucher) => {
+    const date = voucher.date.toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: 'numeric' });
+    return [
+        '--------------------',
+        'MEGAGYM',
+        'COMPROBANTE DE PAGO',
+        '--------------------',
+        `Cliente: ${voucher.memberName}`,
+        `Comprobante: ${voucher.invoice}`,
+        `Fecha: ${date}`,
+        `Concepto: ${voucher.plan}`,
+        `Método: ${voucher.method}`,
+        `Monto pagado: S/ ${voucher.amount.toFixed(2)}`,
+        ...(voucher.debt > 0 ? [`Saldo pendiente: S/ ${voucher.debt.toFixed(2)}`] : []),
+        '--------------------',
+        'Gracias por entrenar con nosotros.',
+        '',
+        '🤖 *Asistente oficial de MegaGym*',
+        'Para consultar tu membresía, pagos, voucher o rutina, escribe a nuestro bot:',
+        '+51 907 935 299',
+        'https://wa.me/51907935299?text=Hola%20MegaGym'
+    ].join('\n');
+};
 
 const findDuplicateIdentity = <T extends { id: string; dni?: string; phone?: string }>(
     records: T[],
@@ -261,6 +302,7 @@ function MemberModal({
     // Payment fields
     const [planPrice, setPlanPrice] = useState(member?.planPrice?.toString() || '70');
     const [amountPaid, setAmountPaid] = useState(member?.amountPaid?.toString() || '70');
+    const [paymentMethod, setPaymentMethod] = useState('efectivo');
 
     // Join Date State (New)
     const [joinDate, setJoinDate] = useState(() => {
@@ -351,6 +393,12 @@ function MemberModal({
 
     const handleSubmit = async () => {
         if (!name.trim() || !phone.trim() || duplicateMember || saving) return;
+        const parsedPlanPrice = parseFloat(planPrice) || 0;
+        const parsedAmountPaid = parseFloat(amountPaid) || 0;
+        if (parsedAmountPaid < 0 || parsedAmountPaid > parsedPlanPrice) {
+            alert(`El monto pagado debe estar entre S/ 0.00 y S/ ${parsedPlanPrice.toFixed(2)}.`);
+            return;
+        }
         setSaving(true);
         try {
             const saved = await onSubmit({
@@ -362,6 +410,7 @@ function MemberModal({
                 plan,
                 status,
                 amountPaid: parseFloat(amountPaid) || 0,
+                paymentMethod,
                 planPrice: parseFloat(planPrice) || 0,
                 expirationDateStr: expirationDate,
                 joinDateStr: joinDate,
@@ -598,6 +647,9 @@ function MemberModal({
                         <label className="block text-xs text-gray-400 mb-1">Monto Pagado (S/)</label>
                         <input
                             type="number"
+                            min="0"
+                            max={Math.max(0, parseFloat(planPrice) || 0)}
+                            step="0.01"
                             value={amountPaid}
                             onChange={(e) => setAmountPaid(e.target.value)}
                             className={cn(
@@ -606,6 +658,20 @@ function MemberModal({
                             )}
                         />
                     </div>
+                    {!member && (
+                        <div className="col-span-2">
+                            <label className="block text-xs text-gray-400 mb-1">Método de pago</label>
+                            <select
+                                value={paymentMethod}
+                                onChange={(e) => setPaymentMethod(e.target.value)}
+                                className="w-full rounded-md border border-neutral-700 bg-neutral-900 px-2 py-2 text-sm text-white focus:border-green-500 focus:outline-none"
+                            >
+                                <option value="efectivo">Efectivo</option>
+                                <option value="yape">Yape / Plin</option>
+                                <option value="transferencia">Transferencia</option>
+                            </select>
+                        </div>
+                    )}
                     {debt > 0 && (
                         <div className="col-span-2 text-center bg-red-500/10 border border-red-500/20 rounded-md py-1">
                             <p className="text-xs text-red-500 font-bold">⚠️ Deuda Pendiente: S/ {debt.toFixed(2)}</p>
@@ -1658,6 +1724,80 @@ function MemberDetailsSheet({
     );
 }
 
+function RegistrationVoucherDialog({ voucher, onClose }: { voucher: RegistrationVoucher; onClose: () => void }) {
+    const whatsappNumber = getWhatsAppNumber(voucher.phone);
+    const whatsappUrl = whatsappNumber
+        ? `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(formatRegistrationVoucher(voucher))}`
+        : '';
+
+    return (
+        <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/75 p-3 sm:items-center" role="presentation">
+            <section
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="registration-success-title"
+                className="max-h-[calc(100dvh-1.5rem)] w-full max-w-sm overflow-y-auto rounded-2xl border border-white/10 bg-neutral-900 shadow-2xl"
+            >
+                <div className="border-b border-white/[0.07] px-4 py-4">
+                    <div className="flex items-start gap-3">
+                        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-green-500/15 text-green-400">
+                            <CheckCircle2 className="h-6 w-6" />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                            <h2 id="registration-success-title" className="text-lg font-bold text-white">Matrícula y pago registrados</h2>
+                            <p className="mt-0.5 truncate text-sm text-gray-400">{voucher.memberName}</p>
+                        </div>
+                        <button type="button" onClick={onClose} aria-label="Cerrar" className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-gray-500 hover:bg-white/5 hover:text-white">
+                            <X className="h-5 w-5" />
+                        </button>
+                    </div>
+                </div>
+
+                <div className="space-y-4 p-4">
+                    <div className="grid grid-cols-2 gap-2 rounded-xl border border-white/[0.07] bg-neutral-950/40 p-3">
+                        <div>
+                            <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-600">Pago</p>
+                            <p className="mt-1 text-xl font-bold tabular-nums text-green-400">S/ {voucher.amount.toFixed(2)}</p>
+                        </div>
+                        <div className="text-right">
+                            <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-600">Método</p>
+                            <p className="mt-1 text-sm font-semibold text-white">{voucher.method}</p>
+                            <p className="mt-0.5 text-[10px] text-gray-600">{voucher.invoice}</p>
+                        </div>
+                    </div>
+
+                    <div className="rounded-xl border border-white/[0.07] bg-black/30 p-3">
+                        <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-gray-400">
+                            <Receipt className="h-4 w-4 text-green-400" /> Vista previa del voucher
+                        </div>
+                        <pre className="whitespace-pre-wrap font-sans text-[11px] leading-relaxed text-gray-300">{formatRegistrationVoucher(voucher)}</pre>
+                    </div>
+
+                    {whatsappUrl ? (
+                        <a
+                            href={whatsappUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#25D366] px-4 text-sm font-bold text-neutral-950 transition-colors hover:bg-[#20bd5a] focus:outline-none focus:ring-2 focus:ring-[#25D366]/60"
+                        >
+                            <WhatsAppIcon className="h-5 w-5" />
+                            Enviar desde mi WhatsApp
+                        </a>
+                    ) : (
+                        <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-3 text-xs text-amber-300">
+                            El cliente no tiene un teléfono válido para abrir WhatsApp.
+                        </div>
+                    )}
+                    <p className="text-center text-[10px] leading-relaxed text-gray-600">Se abrirá la cuenta de WhatsApp activa en este teléfono. Revisa el mensaje y presiona Enviar.</p>
+                    <button type="button" onClick={onClose} className="min-h-11 w-full rounded-xl border border-white/10 bg-neutral-800 px-4 text-sm font-semibold text-gray-200 hover:bg-neutral-700">
+                        Finalizar
+                    </button>
+                </div>
+            </section>
+        </div>
+    );
+}
+
 export function MembersPage() {
     const [members, setMembers] = useState<Member[]>([]);
     const [searchTerm, setSearchTerm] = useState('');
@@ -1675,6 +1815,7 @@ export function MembersPage() {
     const [showCashPaymentModal, setShowCashPaymentModal] = useState(false);
     const [cashPaymentStartsWithRenewal, setCashPaymentStartsWithRenewal] = useState(false);
     const [showRoutinesModal, setShowRoutinesModal] = useState(false);
+    const [registrationVoucher, setRegistrationVoucher] = useState<RegistrationVoucher | null>(null);
 
     // Real-time Firestore Subscription
     useEffect(() => {
@@ -1982,21 +2123,39 @@ export function MembersPage() {
             const joinDateObj = data.joinDateStr ? new Date(jy, jm - 1, jd) : new Date();
             const membershipStartDateStr = data.membershipStartDateStr || data.joinDateStr || '';
             const currentDebt = Math.max(0, Number(data.debt) || 0);
+            const registrationDate = new Date();
+            const initialAmountPaid = Math.max(0, Number(data.amountPaid) || 0);
+            const initialPaymentMethod = PAYMENT_METHOD_LABELS[data.paymentMethod] || 'Efectivo';
+            const initialPayment: MembershipPaymentRecord | null = modalMode === 'create' && initialAmountPaid > 0 ? {
+                amount: initialAmountPaid,
+                method: initialPaymentMethod,
+                date: registrationDate.toISOString(),
+                type: 'initial_membership_payment'
+            } : null;
             const currentMembershipPeriod: MembershipPeriod = {
                 id: `membership_${data.id || 'new'}_${membershipStartDateStr || Date.now()}`,
                 plan: data.plan,
                 startDate: membershipStartDateStr,
                 endDate: data.expirationDateStr || '',
                 planPrice: Number(data.planPrice) || 0,
-                amountPaid: Number(data.amountPaid) || 0,
+                amountPaid: initialAmountPaid,
                 debt: currentDebt,
                 status: data.status === 'active' ? 'active' : 'closed',
-                payments: [],
-                createdAt: new Date().toISOString()
+                payments: initialPayment ? [initialPayment] : [],
+                createdAt: registrationDate.toISOString()
             };
 
             if (modalMode === 'create') {
-                await addDoc(collection(db, 'members'), {
+                const memberRef = doc(collection(db, 'members'));
+                const paymentRef = initialPayment ? doc(collection(db, 'payments')) : null;
+                const invoice = paymentRef ? `BOL-${paymentRef.id.substring(0, 6).toUpperCase()}` : '';
+                const batch = writeBatch(db);
+                const membershipPeriod = {
+                    ...currentMembershipPeriod,
+                    id: `membership_${memberRef.id}_${membershipStartDateStr || Date.now()}`
+                };
+
+                batch.set(memberRef, {
                     name: data.name,
                     dni: data.dni || '',
                     dniNormalized: normalizeDni(data.dni),
@@ -2005,18 +2164,50 @@ export function MembersPage() {
                     phoneNormalized: normalizePhone(data.phone),
                     plan: data.plan,
                     status: data.status,
-                    amountPaid: data.amountPaid,
+                    amountPaid: initialAmountPaid,
                     planPrice: data.planPrice,
-                    debt: data.debt || 0,
+                    debt: currentDebt,
                     startDate: membershipStartDateStr,
                     endDate: data.expirationDateStr || '',
                     expirationDate: expirationDateObj,
                     createdAt: joinDateObj,
-                    membershipHistory: [currentMembershipPeriod],
+                    membershipHistory: [membershipPeriod],
+                    payments: initialPayment ? [initialPayment] : [],
                     adminNotes: data.adminNotes || '',
                     diet: data.diet || '',
                     ...(data.trainingProfile ? { trainingProfile: data.trainingProfile } : {})
                 });
+
+                if (paymentRef && initialPayment) {
+                    batch.set(paymentRef, {
+                        memberName: data.name,
+                        memberId: memberRef.id,
+                        phone: data.phone,
+                        concept: data.plan,
+                        amount: initialAmountPaid,
+                        method: initialPaymentMethod,
+                        invoiceType: 'Boleta',
+                        paymentType: 'initial_membership_payment',
+                        status: 'Pagado',
+                        date: registrationDate,
+                        createdAt: serverTimestamp()
+                    });
+                }
+
+                await batch.commit();
+
+                if (initialPayment && paymentRef) {
+                    setRegistrationVoucher({
+                        memberName: data.name,
+                        phone: data.phone,
+                        plan: data.plan,
+                        amount: initialAmountPaid,
+                        method: initialPaymentMethod,
+                        date: registrationDate,
+                        invoice,
+                        debt: currentDebt
+                    });
+                }
             } else if (modalMode === 'edit' && data.id) {
                 const memberRef = doc(db, 'members', data.id);
                 const memberSnap = await getDoc(memberRef);
@@ -2610,6 +2801,13 @@ export function MembersPage() {
                         setSelectedMember(undefined);
                     }}
                     onSubmit={handleCashPayment}
+                />
+            )}
+
+            {registrationVoucher && (
+                <RegistrationVoucherDialog
+                    voucher={registrationVoucher}
+                    onClose={() => setRegistrationVoucher(null)}
                 />
             )}
 

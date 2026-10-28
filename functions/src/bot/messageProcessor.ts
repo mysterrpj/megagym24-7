@@ -1,15 +1,28 @@
-import { diffDateOnlyDays } from '../reminderPolicy';
+import { deriveMembershipLifecycleStatus, diffDateOnlyDays } from '../reminderPolicy';
 
 // Busca un miembro probando múltiples formatos de teléfono
 async function findMember(db: any, phone: string) {
-    const cleanPhone = phone.replace(/\s/g, '');
+    const normalizedPhone = normalizePhoneDigits(phone);
+    if (normalizedPhone) {
+        const normalizedSnap = await db.collection('members')
+            .where('phoneNormalized', '==', normalizedPhone)
+            .limit(1)
+            .get();
+        if (!normalizedSnap.empty) return normalizedSnap;
+    }
+
+    const cleanPhone = String(phone || '').replace(/\s/g, '').replace(/^whatsapp:/i, '');
     const base = cleanPhone.replace(/^\+?51/, '');
+    const groupedBase = base.length === 9 ? `${base.slice(0, 3)} ${base.slice(3, 6)} ${base.slice(6)}` : base;
     const formats = new Set([
         cleanPhone,
         cleanPhone.startsWith('+') ? cleanPhone.slice(1) : '+' + cleanPhone,
         base,
         '+51' + base,
         '51' + base,
+        groupedBase,
+        '+51 ' + groupedBase,
+        '51 ' + groupedBase,
         'whatsapp:' + cleanPhone,
         'whatsapp:+' + base,
         'whatsapp:51' + base,
@@ -1025,6 +1038,21 @@ export async function executeTool(name: string, args: any) {
 
         case 'get_student_routine':
             try {
+                const memberSnap = await findMember(dbInner, args.phone);
+                if (!memberSnap || memberSnap.empty) {
+                    return { found: false, reason: 'no_member', message: 'No encontré tu membresía con este número.' };
+                }
+                const memberData = memberSnap.docs[0].data();
+                const membershipStatus = deriveMembershipLifecycleStatus(memberData, getLimaTodayString());
+                if (membershipStatus !== 'active') {
+                    return {
+                        found: false,
+                        reason: 'membership_inactive',
+                        endDate: memberData.endDate || null,
+                        message: `Tu membresía${memberData.endDate ? ` venció el ${memberData.endDate}` : ' no está activa'}. Para volver a acceder a tu rutina necesitas renovar tu membresía.`
+                    };
+                }
+
                 const searchRoutines = async (db: any, phone: string) => {
                     const snap = await db.collection('studentRoutineAssignments')
                         .where('studentPhone', '==', phone)
@@ -1037,8 +1065,8 @@ export async function executeTool(name: string, args: any) {
                         status: doc.data().status
                     }));
 
-                    // Solo devolver aquellas que tengan url
-                    routines = routines.filter((r: any) => r.url);
+                    // Solo entregar asignaciones activas que tengan URL.
+                    routines = routines.filter((r: any) => r.url && r.status === 'active');
 
                     // Ordenar por fecha descendente en memoria para evitar requisito de índice compuesto
                     return routines.sort((a: any, b: any) => {
@@ -1094,6 +1122,15 @@ export async function executeTool(name: string, args: any) {
                 const snap = await findMember(dbInner, args.phone);
                 if (!snap) return { found: false, message: 'No se encontró tu perfil de alumno.' };
                 const memberData = snap.docs[0].data();
+                const membershipStatus = deriveMembershipLifecycleStatus(memberData, getLimaTodayString());
+                if (membershipStatus !== 'active') {
+                    return {
+                        found: false,
+                        reason: 'membership_inactive',
+                        endDate: memberData.endDate || null,
+                        message: `Tu membresía${memberData.endDate ? ` venció el ${memberData.endDate}` : ' no está activa'}. Para volver a acceder a tu dieta necesitas renovar tu membresía.`
+                    };
+                }
                 if (!memberData.diet) {
                     return { found: false, message: 'Aún no tienes una dieta asignada en tu perfil.' };
                 }
@@ -1117,16 +1154,8 @@ export async function executeTool(name: string, args: any) {
                 }
                 const memberData = memSnap.docs[0].data();
 
-                // Reutiliza la misma lógica de estado del bot: vencido >= 15 días o inactivo
-                // bloquea el acceso personalizado (misma frontera que las rutinas/dieta).
-                let daysOverdueLocal: number | null = null;
-                if (memberData.endDate) {
-                    const overdueDays = diffDateOnlyDays(memberData.endDate, getLimaTodayString());
-                    if (overdueDays !== null && overdueDays > 0) daysOverdueLocal = overdueDays;
-                }
-                const eligible = memberData.status !== 'inactive'
-                    && (daysOverdueLocal === null || daysOverdueLocal < 15);
-                if (!eligible) {
+                const membershipStatus = deriveMembershipLifecycleStatus(memberData, getLimaTodayString());
+                if (membershipStatus !== 'active') {
                     return {
                         eligible: false,
                         reason: 'inactive_or_overdue',
@@ -1624,9 +1653,9 @@ export async function processMessage(db: any, phone: string, messageText: string
         - Miembro VENCIDO (días vencido: ${daysOverdue}): Saluda de forma cálida y motivadora, reconoce que sigue presente y ofrece ayuda para renovar. Ejemplo: "¡Hola ${clientFirstName}! Qué bueno saber de ti 😊 Tu membresía venció hace ${daysOverdue} día(s), pero eso se arregla en un momento. ¿Te genero el link para renovar y seguir sin parar? 💪🔥"
     3. Si el cliente está REGISTRADO, usa su nombre (${clientFirstName}) y NO le pidas datos que ya tienes (DNI, email).
     4. COMPORTAMIENTO SEGÚN DÍAS VENCIDO (daysOverdue = ${daysOverdue}):
-       - daysOverdue es null o 0: Membresía activa. Comportamiento normal, acceso completo.
-       - daysOverdue entre 1 y 14: Acceso completo. Responde con normalidad sin ningún aviso de vencimiento ni links de pago. Solo si el cliente PIDE renovar o preguntar por su membresía, entonces ayúdalo.
-       - daysOverdue >= 15: MODO ACCESO RESTRINGIDO. NO uses get_student_routine, get_student_diet, send_payment_voucher, get_payment_history ni check_member_status. Responde preguntas generales (horarios, precios generales, fitness, cualquier tema) con total normalidad. NO menciones que está bloqueado, NO generes links de pago, NO menciones el vencimiento a menos que el cliente lo pregunte directamente.
+       - daysOverdue es null o 0: Membresía activa. Comportamiento normal, acceso personalizado completo.
+       - daysOverdue >= 1: MEMBRESÍA VENCIDA. Sigue respondiendo con normalidad sobre horarios, precios, ubicación, pagos, vouchers, estado de membresía, renovación y preguntas generales. NO entregues rutinas, dietas ni asesoría personalizada por voz hasta que renueve. Si pide uno de esos beneficios, explícale con calidez que su membresía venció y ofrécele ayuda para renovar.
+       - Los comprobantes y el historial de pagos siguen disponibles aunque la membresía esté vencida; son información financiera del cliente, no beneficios de entrenamiento.
     5. REGLAS DE COBRO:
        - Si el cliente quiere pagar su deuda, saldo pendiente o monto que debe, usa generate_payment_link con paymentType='debt_payment'. No lo renueves con ese link; ese link solo cancela o reduce deuda.
        - Si el cliente quiere pagar o renovar su membresía, usa generate_payment_link con paymentType='membership'.
@@ -1635,7 +1664,7 @@ export async function processMessage(db: any, phone: string, messageText: string
        - Si el cliente pide clase libre, pase diario, usar máquinas por un día o gimnasio por día, NO generes link. Indica que ese pago se realiza personalmente en recepción.
        - Cuando generes link de membresía, responde con entusiasmo como antes. Cuando generes link de clase grupal, deja claro que es sólo para clases grupales y no para clase libre de máquinas.
        - Si el cliente todavía no te dijo día u hora de la clase grupal, NO generes el link todavía. Primero aclara si quiere 8:30 AM u 8:00 PM.
-    6. Si pide su rutina, usa 'get_student_routine' (solo si daysOverdue < 20). Si pide su dieta, usa 'get_student_diet' (solo si daysOverdue < 20).
+    6. Si pide su rutina, usa 'get_student_routine'; la herramienta valida de forma obligatoria que su membresía esté activa. Si pide su dieta, usa 'get_student_diet', que aplica la misma validación. Nunca inventes ni reutilices enlaces guardados si la herramienta niega el acceso.
     7. Si responde a tus preguntas de perfil (objetivo, nivel, horario, limitaciones, etc.), comparte datos sobre su rutina (si entrenó, qué le cuesta, progreso, dolor, faltas) o comparte datos de nutrición útiles (comida que le cuesta, ansiedad, antojos, adherencia, preferencias), usa 'update_member_profile' inmediatamente.
     8. Usa la memoria del cliente (campo "Memoria útil del cliente") para responder de forma personal y natural. Si el cliente pregunta si recuerdas algo de una conversación anterior (por chat o por voz), apóyate en esa memoria y continúa desde ahí con naturalidad, por ejemplo: "¡Claro! Estábamos hablando de...". No enumeres el perfil como expediente; intégralo con tacto.
     9. Completa el perfil poco a poco, nunca como interrogatorio. Solo pregunta un dato faltante cuando ayude de verdad a acompañarlo mejor.
@@ -1727,6 +1756,10 @@ ${latestRoutine.url}
 
 Rev\u00edsala y dime qu\u00e9 ejercicio quieres que te explique.`;
                 }
+            } else if (toolCall.function.name === 'get_student_routine' && functionResult?.reason === 'membership_inactive') {
+                directToolReply = `${clientFirstName ? `${clientFirstName}, ` : ''}${functionResult.message} Si quieres, te ayudo a renovar ahora mismo. 💪`;
+            } else if (toolCall.function.name === 'get_student_diet' && functionResult?.reason === 'membership_inactive') {
+                directToolReply = `${clientFirstName ? `${clientFirstName}, ` : ''}${functionResult.message} Si quieres, te ayudo a renovar ahora mismo. 💪`;
             }
             toolMessages.push({
                 tool_call_id: toolCall.id,

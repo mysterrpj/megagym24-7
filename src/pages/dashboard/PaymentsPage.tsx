@@ -109,9 +109,10 @@ export function PaymentsPage() {
                 content: formatVoucherText(voucherTx)
             });
             alert('Voucher reenviado por WhatsApp.');
-        } catch (error) {
+        } catch (error: any) {
             console.error('Error enviando voucher:', error);
-            alert('No se pudo reenviar el voucher. Revisa la conexion o intenta nuevamente.');
+            const detail = String(error?.message || '').replace(/^FirebaseError:\s*/i, '').trim();
+            alert(detail || 'No se pudo reenviar el voucher. Revisa la conexión o intenta nuevamente.');
         } finally {
             setSendingVoucher(false);
         }
