@@ -1646,12 +1646,11 @@ export const getVoiceContext = functions
                 for (const fmt of formats) {
                     const snap = await db.collection('studentRoutineAssignments')
                         .where('studentPhone', '==', fmt)
-                        .limit(5)
                         .get();
                     if (!snap.empty) {
                         detailData = snap.docs
                             .map((d: any) => d.data())
-                            .filter((d: any) => d?.payload)
+                            .filter((d: any) => d?.payload && d.status === 'active' && routineUrl && d.routineUrl === routineUrl)
                             .sort((a: any, b: any) => {
                                 const aDate = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(a.createdAt || 0);
                                 const bDate = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.createdAt || 0);
