@@ -11,7 +11,11 @@ export function useUserRole() {
     const [user, setUser] = useState<User | null>(null);
 
     useEffect(() => {
+        let revision = 0;
         const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+            const currentRevision = ++revision;
+            setLoading(true);
+            setRole(null);
             setUser(currentUser);
             if (currentUser) {
                 // Hardcode admin for the main admin email for safety
@@ -24,12 +28,14 @@ export function useUserRole() {
                 try {
                     const docRef = doc(db, 'members', currentUser.uid);
                     const docSnap = await getDoc(docRef);
+                    if (currentRevision !== revision) return;
                     if (docSnap.exists()) {
                         setRole(docSnap.data().role || 'user');
                     } else {
                         setRole('user');
                     }
                 } catch (error) {
+                    if (currentRevision !== revision) return;
                     console.error("Error fetching role:", error);
                     setRole('user');
                 }
@@ -39,7 +45,10 @@ export function useUserRole() {
             setLoading(false);
         });
 
-        return () => unsubscribe();
+        return () => {
+            revision++;
+            unsubscribe();
+        };
     }, []);
 
     return { role, loading, user };

@@ -3,8 +3,10 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
-import { useNavigate, Link } from 'react-router-dom';
-import { getAuth, signInWithEmailAndPassword } from 'firebase/auth';
+import { useNavigate, Link, Navigate } from 'react-router-dom';
+import { browserLocalPersistence, browserSessionPersistence, setPersistence, signInWithEmailAndPassword } from 'firebase/auth';
+import { auth } from '@/lib/firebase';
+import { useUserRole } from '@/lib/auth';
 
 export function LoginPage() {
     const navigate = useNavigate();
@@ -12,6 +14,8 @@ export function LoginPage() {
     const [password, setPassword] = useState('');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
+    const [rememberMe, setRememberMe] = useState(true);
+    const { user, role, loading: restoringSession } = useUserRole();
 
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -19,22 +23,32 @@ export function LoginPage() {
         setError('');
 
         try {
-            const auth = getAuth();
+            // Set persistence before signing in; Firebase manages tokens, never passwords.
+            await setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence);
             await signInWithEmailAndPassword(auth, email, password);
-            navigate('/dashboard/messages');
-        } catch (err: any) {
-            // For prototype/demo, allow easy bypass if needed, but here we stick to Auth
-            // Or fail gracefully
-            setError('Credenciales inválidas. Intenta de nuevo.');
-
-            // Setup bypass for testing if no users exist
-            if (email === 'admin@fitia.com' && password === 'admin123') {
-                navigate('/dashboard/messages');
+            // The restored auth state below redirects only after the role is resolved.
+        } catch (err: unknown) {
+            const code = (err as { code?: string }).code;
+            if (code === 'auth/web-storage-unsupported' || code === 'auth/operation-not-supported-in-this-environment') {
+                setError('El navegador no permite guardar la sesión. Habilita el almacenamiento del sitio e intenta de nuevo.');
+            } else if (code === 'auth/network-request-failed') {
+                setError('No se pudo conectar. Revisa tu conexión e intenta de nuevo.');
+            } else {
+                setError('No se pudo iniciar sesión. Revisa tus credenciales e intenta de nuevo.');
             }
         } finally {
             setLoading(false);
         }
     };
+
+    // Wait for Firebase to restore the saved session before showing the login form.
+    if (restoringSession || loading) {
+        return <div className="flex items-center justify-center min-h-screen bg-black text-white" role="status">Restaurando sesión...</div>;
+    }
+
+    if (user) {
+        return <Navigate to={role === 'admin' ? '/dashboard/messages' : '/member-dashboard'} replace />;
+    }
 
     return (
         <div className="min-h-screen bg-black flex items-center justify-center p-4 relative overflow-hidden">
@@ -83,7 +97,7 @@ export function LoginPage() {
 
                         <div className="flex items-center justify-between text-sm">
                             <label className="flex items-center gap-2 text-gray-400 cursor-pointer">
-                                <input type="checkbox" className="rounded border-gray-600 bg-neutral-800 text-green-500 focus:ring-green-500/20" />
+                                <input type="checkbox" checked={rememberMe} onChange={(e) => setRememberMe(e.target.checked)} className="rounded border-gray-600 bg-neutral-800 text-green-500 focus:ring-green-500/20" />
                                 Recordarme
                             </label>
                             <a href="#" className="text-green-500 hover:text-green-400 hover:underline">
